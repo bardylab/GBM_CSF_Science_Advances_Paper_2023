@@ -15,11 +15,11 @@ options("yaml.eval.expr" = TRUE)
 script_path <- rstudioapi::getActiveDocumentContext()$path
 script_dir <- dirname(script_path)
 setwd(script_dir)
-workingdirectory <- dirname(script_dir)
+workingdirectory <- paste0(script_dir)
 datadirectory <- paste0(workingdirectory, "/data")
 resultsdirectory <- paste0(workingdirectory, "/results")
-cell_line_directory <- paste0(datadirectory, "/RData/Individual Cell Line RData/")
-dir.create(resultsdirectory)
+cell_line_directory <- paste0(datadirectory, "/RData")
+##dir.create(resultsdirectory)
 
 ## Load required libraries
 if(!require(dplyr)){
@@ -48,13 +48,19 @@ if(!require(ggpointdensity)){
 }
 ```
 
-2.  ***Load the required RData files that have been previously QC***
+2.  ***Load the required RData files that have previously been QC'd***
 
-```{Load RData files that have been previously QC}
+```{Load RData files that have previously been QC'd}
 ##Load the required TME and CSF libraries, these have been previously QC'd
-file_names <- as.list(dir(cell_line_directory))
-file_names <- lapply(file_names, function(x) paste0(cell_line_directory, x))
+set.seed(1)
+file_names <- list.files(paste0(cell_line_directory, '/Individual Cell Line RData/'), full.names = T)
 lapply(file_names, load, .GlobalEnv)
+
+## Load combined datasets
+set.seed(1)
+file_names <- list.files(cell_line_directory, pattern = "GBM_*",full.names = T)
+lapply(file_names[1:2], load, .GlobalEnv) ##Make sure you load the FILTERED GBM_ALL data - they are both named 'Bardy_10x' in R
+rm(file_names)
 ```
 
 3.  ***We will now subsample each seurat object to have equal numbers in both TME and CSF. Run Step 9 after generating the merged Seurat Object to create a new object with cells downsampled to contain 1400 cells across all cell lines.***
@@ -665,7 +671,7 @@ CSF_Markers <- FindMarkers(GBM_700cells, ident.1 = "CSF", ident.2 = "TME", logfc
 CSF_Markers <- CSF_Markers[order(-CSF_Markers$avg_log2FC, CSF_Markers$p_val_adj),]
 
 write.csv(CSF_Markers, file = paste0(resultsdirectory, "/Differential Expression/GSEA_differentialexpression-all.csv"))
-##CSF_Markers <- read.csv(file = paste(resultsdirectory, "/Differential Expression/GSEA_differentialexpression-all.csv"))
+##CSF_Markers <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/GSEA_differentialexpression-all.csv"))
 
 CSF_Features <- rownames(CSF_Markers[1:20,])
 TME_Features <- rownames(CSF_Markers[3566:3585,])
@@ -817,7 +823,7 @@ CSF_Markers_MN1 <- FindMarkers(GBM_700cells, ident.1 = "MN1_CSF", ident.2 = "MN1
 CSF_Markers_MN1 <- CSF_Markers_MN1[order(-CSF_Markers_MN1$avg_log2FC, CSF_Markers_MN1$p_val_adj),]
 
 ##Create a matrix containing the top genes from the differential expression of all cells
-Fold_change <- data.frame(matrix(ncol = 10, nrow= 3585))
+Fold_change <- data.frame(matrix(ncol = 10, nrow=3585))
 col_names <- c("111", "134", "159", "448", "468", "469", "497", "BAH1","MN1", "HW1")
 colnames(Fold_change) <- col_names
 rownames(Fold_change) <- rownames(CSF_Markers[c(1:3585),])
@@ -873,7 +879,7 @@ for(i in 1:length(clusters_FC)) {
 
 12. ***We now perform DE between Cycling, NonCycling OR MESlike OR Quiescent, NonQuiescent cells in CSF and TME. For Venn Diagram, SUPP FIGURE 5B***
 
-```{r Conduct DE for Proliferation and MES-like}
+```{Conduct DE for Proliferation and MES-like}
 ##Differential expression 
 ##Add new columns of Condition_Quadrant, Condition_Proliferation, Condition_Quiescence. Run this AFTER calculating meta-module, proliferation, quiescence scores as above. 
 
@@ -960,34 +966,7 @@ ggsave(FP, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_MKI67_Con
 ii. ***FIGURE 4 and SUPP FIGURE 4.***
 
 ```{RNA seq Plots for Figure 4 and Supp Figure 4}
-## FIGURE 4A, E and F: Ridge plot of MESlike and MESlike 1, 2 Scores.####
-RP <- RidgePlot(Bardy_10x, group.by = "MESlike.Score", log = FALSE)  + ##you can replace the group.by variable to any column on the metadata. Change to "Quiescent.Score" for Figure 3I. 
-  theme(legend.position = "none", legend.text = element_text(size = 16), legend.justification = "center")
-RP
-ggsave(RP, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_RP_MESlikeScore_NoLegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
-
-## FIGURE 4C and D: Proliferation and MES-like scatter plots with ggplot2. ####
-int_breaks <- function(x, n = 5) pretty(x, n)[pretty(x, n) %% 1 == 0] ## function to generate only whole-integer breaks for x and y axis ticks
-scatterPlot <- ggplot(Bardy_10x@meta.data, aes(x = MESlike.Score , y = Proliferation.Score)) + ## transform to change the order of the plots in facet_wrap()
-  geom_vline(xintercept=0, linetype="dotted", color = "black", size = 0.5) +
-  geom_hline(yintercept=0, linetype="dotted", color = "black", size = 0.5) +
-  geom_point(size = 2) +
-  geom_pointdensity(adjust = 0.5) +
-  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(25),
-                         breaks = seq(0,13000,2000),
-                         limits = c(0,13000)) +
-  ## scale_color_viridis_c() +
-  ## facet_wrap( ~ Condition_PatientID) +
-  theme_bw() +
-  theme(legend.position = "none", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20), axis.title.y = element_text(size = 20), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
-  xlab(expression(atop("Relative MESlike Score"))) + ylab(expression(atop("Proliferation Score"))) +
-  scale_x_continuous(breaks = int_breaks) +
-  scale_y_continuous(breaks = int_breaks) +
-  coord_cartesian(xlim = c(-0.5,1), ylim = c(-0.5, 1))
-scatterPlot
-ggsave(scatterPlot, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_proliferation_MESlike_alltumours_scale0-13000_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
-
-## FIGURE 4J and K: Recreate Neftel meta-module plots with ggplot2. ####
+## FIGURE 4A-C: Recreate Neftel meta-module plots with ggplot2. ####
 library(ggplot2)
 library(ggpointdensity)
 Bardy_10x$Condition <- factor(Bardy_10x$Condition, levels = c("TME", "CSF")) ##Set ;evels for plotting order. 
@@ -1011,6 +990,52 @@ scatterPlot <- ggplot(Bardy_10x@meta.data, aes(x = rel.metamodule.x.score, y = r
 scatterPlot
 ggsave(scatterPlot, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_metamodules_bypatient_alltumours_scale0-2000_nolegend.pdf", sep = "/"), height = 12, width = 12, dpi = 300, useDingbats = FALSE)
 
+## FIGURE 4F, J and I: Ridge plot of MESlike and MESlike 1, 2 Scores.####
+RP <- RidgePlot(Bardy_10x, group.by = "MESlike.Score", log = FALSE)  + ##you can replace the group.by variable to any column on the metadata. Change to "Quiescent.Score" for Figure 3I. 
+  theme(legend.position = "none", legend.text = element_text(size = 16), legend.justification = "center")
+RP
+ggsave(RP, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_RP_MESlikeScore_NoLegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+## FIGURE 4E: PIE CHARTS OF CELL PROPORTIONS
+GBM_metadata <- Bardy_10x@meta.data
+GBM_metadata <- GBM_metadata[,-c(1:3,7:26,28:31,34:36,39:40,42:48,50:52,55)]
+
+proportions_neftel <- GBM_metadata %>%
+  group_by(Condition, PatientID, Quadrant) %>%
+  summarise(n = n()) %>%
+  mutate(freq = (n/sum(n))*100)
+
+proportions_neftel$freq <- round(proportions_neftel$freq, 2)
+proportions_neftel$PatientID <- factor(proportions_neftel$PatientID, levels = c("BAH1","HW1","MN1","SANTB00111","SANTB00134","SANTB00159","SANTB00448","SANTB00468","SANTB00469","SANTB00497"))
+
+ggplot(proportions_neftel, aes(x = "", y = proportions_neftel$freq, fill = proportions_neftel$Quadrant)) +
+  geom_col() +
+  ##geom_text(aes(label = proportions_neftel$freq), position = position_stack(vjust = 1)) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  facet_grid(Condition ~ PatientID) +
+  scale_fill_manual(values = c("#FECC66","#FB0207","#804003","#0F80FF")) + theme(legend.position = "none")
+
+## FIGURE 4H and I: Proliferation and MES-like scatter plots with ggplot2. ####
+int_breaks <- function(x, n = 5) pretty(x, n)[pretty(x, n) %% 1 == 0] ## function to generate only whole-integer breaks for x and y axis ticks
+scatterPlot <- ggplot(Bardy_10x@meta.data, aes(x = MESlike.Score , y = Proliferation.Score)) + ## transform to change the order of the plots in facet_wrap()
+  geom_vline(xintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_hline(yintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_point(size = 2) +
+  geom_pointdensity(adjust = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(25),
+                         breaks = seq(0,13000,2000),
+                         limits = c(0,13000)) +
+  ## scale_color_viridis_c() +
+  ## facet_wrap( ~ Condition_PatientID) +
+  theme_bw() +
+  theme(legend.position = "none", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20), axis.title.y = element_text(size = 20), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab(expression(atop("Relative MESlike Score"))) + ylab(expression(atop("Proliferation Score"))) +
+  scale_x_continuous(breaks = int_breaks) +
+  scale_y_continuous(breaks = int_breaks) +
+  coord_cartesian(xlim = c(-0.5,1), ylim = c(-0.5, 1))
+scatterPlot
+ggsave(scatterPlot, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_proliferation_MESlike_alltumours_scale0-13000_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 
 ## SUPP FIGURE 4A and B. Recreate Neftel meta-module plots with ggplot2 coloured by proliferation or quiescence scores. ####
 library(ggplot2)
@@ -1181,7 +1206,6 @@ Single_heatmap$`Average FC` <- CSF_Markers[c(1:20,3566:3585),2]
 Single_heatmap$`Average FC` <- Single_heatmap[order(-Single_heatmap$`Average FC`),]
 Single_heatmap <- as.matrix(Single_heatmap)
 
-  
 pdf(file = paste0(resultsdirectory, "/plots/Heatmap/SingleHeatmap_Downsampled.pdf"), width = 4, height = 12, onefile = T) ##Run to save as pdf
 
 color_h <- colorRamp2(c(-2.5,-1,-0.5,0,2.5,5), c("blue","deepskyblue","deepskyblue","white","red","firebrick"))
@@ -1256,6 +1280,7 @@ FP
 gsave(FP, filename = paste(resultsdirectory, "/plots/UMAP/NUPR1_splitbyCondition_NoLegend.pdf", sep = "/"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
 
 ## SUPP FIGURE 6A: Violin Plot showing expression of NUPR1 across quadrants. ####
+GBM_700cells$Condition <- factor(GBM_700cells$Condition, levels = c("CSF","TME"))
 VP <- VlnPlot(GBM_700cells, group.by = c("Quadrant"), features = "NUPR1", cols = c("red","black"),split.plot = TRUE, split.by = "Condition", pt.size = 0)  + ##you can replace the group.by variable to any column on the metadata
   theme(legend.position = "bottom", legend.text = element_text(size = 22), legend.justification = "center", 
         axis.text.x = element_text(size = 22, angle = 0, hjust = 0), axis.text.y = element_text(size = 22), 
@@ -1264,7 +1289,12 @@ VP <- VlnPlot(GBM_700cells, group.by = c("Quadrant"), features = "NUPR1", cols =
 VP
 ggsave(VP, filename = paste(resultsdirectory, "/plots/Differential expression/GBM_VP_NUPR1_Legend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 
-## SUPP FIGURE 6E: Violin Plot showing expression of NUPR1 across quadrants. ####
+RP <- RidgePlot(GBM_700cells, features = "NUPR1", group.by = "Condition", sort = "PatientID", log = F)  + ##you can replace the group.by variable to any column on the metadata. Change to "Quiescent.Score" for Figure 3I. 
+  theme(legend.position = "none", legend.text = element_text(size = 16), legend.justification = "center")
+RP
+ggsave(RP, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_RP_ProliferationScore_NoLegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+## SUPP FIGURE 6E: Hierarchical clustering and heatmap of treatment response in GM and CSF. ####
 ##First we perform a hierarchical clustering to cluster cell lines together. 
 
 ##Load data - average viability of cells with treatment. 
@@ -1377,3 +1407,214 @@ umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, rep
 umap
 ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_MESlike_splitbyCondition_NoLegend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
 ```
+
+```{r}
+##Load differential expression genes
+set.seed(1)   
+file_names <- list.files(paste0(resultsdirectory,"/Differential Expression"), pattern = "CSF_Markers_*", full.names = F)
+CSF_markers <- lapply(list.files(paste0(resultsdirectory,"/Differential Expression"), pattern = "CSF_Markers_*", full.names = F), function(x) {read.csv(paste0(resultsdirectory,"/Differential Expression/",x), header = T)})
+
+for(i in 1:length(CSF_markers)){
+  names(CSF_markers)[[i]] <- file_names[[i]]
+  rownames(CSF_markers[[i]]) <- CSF_markers[[i]]$X
+ CSF_markers[[i]] <- CSF_markers[[i]][,-c(1:2,4:5,8:11)]
+  CSF_markers[["CSF_Markers_469_700cells_percondition_downsample.csv"]] <- CSF_markers[["CSF_Markers_469_700cells_percondition_downsample.csv"]][-c(5756),]
+}
+
+##Load marker list
+NUPR1_markers <- read.csv(file = paste0(datadirectory, "/reference_sheets/NUPR1_pathway_markers.csv"))
+NUPR1_markers <- NUPR1_markers[,-c(1:7)]
+
+L2FC_NUPR1markers <- lapply(CSF_markers[3:12], function(x){
+  x[NUPR1_markers$all_genes,]
+})
+
+##Create a matrix containing the top genes from the differential expression of all cells
+Fold_change <- data.frame(matrix(ncol = 10, nrow=44))
+col_names <- c("111","134", "159", "448", "468", "469","497","BAH1","MN1", "HW1")
+colnames(Fold_change) <- col_names
+rownames(Fold_change) <- NUPR1_markers$all_genes
+
+for(i in 1:length(L2FC_NUPR1markers)){
+  names(L2FC_NUPR1markers)[[i]] <- col_names[[i]]
+  names(L2FC_NUPR1markers) %in% colnames(Fold_change) ##TRUE
+  Fold_change[i] <- L2FC_NUPR1markers[[i]]$avg_log2FC
+}
+Fold_change <- Fold_change[rowSums(is.na(Fold_change)) != ncol(Fold_change),]
+
+## Function to caluclate a distance matrix by excluding NA values
+dist_no_na <- function(Fold_change) {
+    edist <- dist(Fold_change) ## calulcate dist
+    edist[which(is.na(edist))] <- max(edist, na.rm=TRUE) * 1.1 ## get the maximum value, multiply by 1.1 and add to NA values
+    return(edist)
+}
+
+Dist <- dist_no_na(Fold_change)
+Clust <- hclust(Dist)
+plot(Clust)
+
+pdf(file = paste0(resultsdirectory, "/plots/Heatmap/Heatmap_NUPR1_associated_genes_DE_percellline.pdf"), width = 12, height = 12, onefile = T) ##Run to save as pdf
+color_h <- colorRamp2(c(-1,0,2.5), c("blue","white","red"))
+h <- Heatmap(as.matrix(Fold_change), show_row_names = TRUE,
+             show_column_names = T, 
+             cluster_columns = T,
+             ##cluster_columns = function(m) as.dendrogram(Clust), 
+             column_dend_reorder = T,
+             row_dend_reorder = F,
+             cluster_rows = function(m) as.dendrogram(Clust),
+             show_row_dend = TRUE, 
+             show_column_dend = TRUE,
+             column_dend_height = unit(1, "cm"),
+             row_dend_width = unit(2, "cm"),
+             col = color_h, ##update colors in previous step
+             use_raster = FALSE, 
+             raster_device = "png",
+             ##top_annotation = column_ha,
+             ##bottom_annotation = c(bottom_anno,bottom),
+             na_col = "grey89",
+             row_names_gp =  gpar(fontsize = 18),
+             rect_gp = gpar(col = "white", lwd = 1),
+             cell_fun = function(j, i, x, y, width, height, fill) {
+       grid.text(sprintf("%.1f", Fold_change[i, j]), x, y, gp = gpar(fontsize = 10))},
+            heatmap_legend_param = list(
+             title = "Log2FC", at = c(-1,0,1,2)))
+h
+dev.off()
+
+
+## get gene descriptions for NUPR1 associated genes
+mart <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl", host = "www.ensembl.org")
+genes_list <- getBM(
+  filters = "external_gene_name", 
+  attributes = c("external_gene_name","wikigene_description"),
+  values = NUPR1_markers$all_genes,
+  mart = mart)
+markers <- na.omit(merge(NUPR1_markers, genes_list, by.x = 'all_genes', by.y = "external_gene_name", all = TRUE))
+
+## Extract raw matrix and average expression matrix 
+GBM_matrix_raw <- GBM_700cells[["RNA"]]@counts
+GBM_matrix_raw <- as.matrix(GBM_matrix_raw[which(rownames(GBM_matrix_raw) %in% markers$all_genes),])
+GBM_matrix_raw <- GBM_matrix_raw[rowSums(GBM_matrix_raw) > 0,]
+
+GBM_matrix_scaled <- GBM_700cells[["RNA"]]@data
+GBM_matrix_scaled <- as.matrix(GBM_matrix_scaled[which(rownames(GBM_matrix_scaled) %in% markers$all_genes),])
+GBM_matrix_scaled <- GBM_matrix_scaled[rowSums(GBM_matrix_scaled) > 0,]
+
+Idents(GBM_700cells) <- GBM_700cells$Condition_PatientID
+GBM_matrix_avg <- AverageExpression(GBM_700cells, slot = "data")
+GBM_matrix_avg <- as.data.frame(GBM_matrix_avg[[1]])
+GBM_matrix_avg <- GBM_matrix_avg[NUPR1_markers$all_genes,]
+GBM_matrix_avg <- na.omit(GBM_matrix_avg)
+GBM_matrix_avg <- split(GBM_matrix_avg, c("TME","CSF"))
+Heatmap <- as.matrix(t(scale(t(GBM_matrix_avg))))
+
+split.data.frame <- function(x){
+  i <- x[,grepl("TME", names(x))]
+  y <- x[,grepl("CSF", names(x))]
+  z <- ls(i,y)
+}
+
+split.data.frame(GBM_matrix_avg)
+
+GBM_metadata <- GBM_700cells@meta.data
+GBM_metadata <- GBM_metadata[,-c(1:3,7:26,28:31,34:36,39:40,42:48,50:52,55)]
+
+proportions_neftel <- GBM_metadata %>%
+  group_by(Condition_PatientID, Quadrant) %>%
+  summarise(n = n()) %>%
+  mutate(freq = (n/sum(n))*100)
+
+proportions_neftel$freq <- round(proportions_neftel$freq, 2)
+
+ggplot(proportions_neftel, aes(x = "", y = proportions_neftel$freq, fill = proportions_neftel$Quadrant)) +
+  geom_col() +
+  ##geom_text(aes(label = proportions_neftel$freq), position = position_stack(vjust = 1)) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  facet_grid(Condition ~ PatientID) +
+  scale_fill_manual(values = c("#FECC66","#FB0207","#804003","#0F80FF")) + theme(legend.position = "none")
+
+proportions_cycling <- GBM_metadata %>%
+  group_by(Condition, PatientID, Cell_Cycle) %>%
+  summarise(n = n()) %>%
+  mutate(freq = (n/sum(n))*100)
+proportions_cycling
+
+ggplot(proportions_cycling, aes(x = "", y = proportions_cycling$freq, fill = proportions_cycling$Cell_Cycle)) +
+  geom_col() +
+  ##geom_text(aes(label = proportions_neftel$freq), position = position_stack(vjust = 1)) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  facet_grid(Condition ~ PatientID) +
+  scale_fill_manual(values = c("blue","red")) + theme(legend.position = "none")
+
+GBM_metadata <- GBM_metadata[!duplicated(GBM_metadata$Condition_PatientID),]
+GBM_metadata <- GBM_metadata[,-c(4:13)]
+
+## FIGURE 5B: Heatmap of top 20 genes ####
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(circlize)
+library(pals)
+library(magick)
+library(dendsort)
+library(colorspace)
+library(stats)
+
+##color_h <- colorRamp2(c(-5,-2.5,-1,0,2.5,5), c("blue","deepskyblue","deepskyblue","white","red","firebrick"))
+proportions_neftel <- as.data.frame(proportions_neftel)
+proportions_neftel <- reshape2::dcast(proportions_neftel, Condition_PatientID ~ Quadrant)
+row.names(proportions_neftel) <- proportions_neftel$Condition_PatientID
+proportions_neftel$Condition_PatientID <- NULL
+head(proportions_neftel)
+proportions_neftel[is.na(proportions_neftel)] <- 0
+proportions_neftel <- round(proportions_neftel, digits = 1)
+names <- rownames(proportions_neftel)
+Heatmap <- Heatmap[,names]
+row.names(proportions_neftel) == colnames(Heatmap) ## TRUE
+
+proportions_cycling <- as.data.frame(proportions_cycling)
+proportions_cycling <- reshape2::dcast(proportions_cycling, Condition_PatientID ~ Cell_Cycle)
+row.names(proportions_cycling) <- proportions_cycling$Condition_PatientID
+proportions_cycling$Condition_PatientID <- NULL
+head(proportions_cycling)
+proportions_cycling[is.na(proportions_cycling)] <- 0
+proportions_cycling <- round(proportions_cycling, digits = 1)
+row.names(proportions_cycling) == colnames(Heatmap) ##TRUE
+
+bottom_anno <- HeatmapAnnotation(quadrant_persample = anno_barplot(proportions_neftel, gp = gpar(fill = c("#FECC66","#FB0207","#804003","#0F80FF"))))
+
+bottom <- HeatmapAnnotation(cycling_persample = anno_barplot(proportions_cycling, gp = gpar(fill = c("blue","red"))))
+
+column_ha <- HeatmapAnnotation(Condition = anno_empty(border = T))
+
+pdf(file = paste0(resultsdirectory, "plots/Heatmap/Heatmap_2_Downsampled.pdf"), width = 12, height = 12, onefile = T) ##Run to save as pdf
+h <- Heatmap(as.matrix(Fold_change), show_row_names = TRUE,
+             show_column_names = T, 
+             cluster_columns = T,
+             ##cluster_columns = function(m) as.dendrogram(Clust), 
+             column_dend_reorder = F,
+             row_dend_reorder = F,
+             cluster_rows = function(m) as.dendrogram(Clust),
+             show_row_dend = TRUE, 
+             show_column_dend = TRUE,
+             column_dend_height = unit(1, "cm"),
+             row_dend_width = unit(2, "cm"),
+             col = color_h, ##update colors in previous step
+             use_raster = FALSE, 
+             raster_device = "png",
+             ##top_annotation = column_ha,
+             ##bottom_annotation = c(bottom_anno,bottom),
+             na_col = "grey",
+             row_names_gp =  gpar(fontsize = 18),
+             rect_gp = gpar(col = "white", lwd = 1),
+             cell_fun = function(j, i, x, y, width, height, fill) {
+       grid.text(sprintf("%.1f", Fold_change[i, j]), x, y, gp = gpar(fontsize = 10))},
+            heatmap_legend_param = list(
+             title = "Log2FC", at = c(-1,0,1,2)))
+h
+
+dev.off()
+
+```
+
