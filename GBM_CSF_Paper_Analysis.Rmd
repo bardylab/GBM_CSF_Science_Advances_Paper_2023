@@ -1277,7 +1277,7 @@ FP <- FeaturePlot(Bardy_10x, features = "NUPR1", pt.size = 0.2, label = FALSE, r
         panel.border = element_rect(fill=NA, colour = "black", size=1.5))  & 
   coord_cartesian(xlim = c(-15,15), ylim = c(-15, 15)) 
 FP 
-gsave(FP, filename = paste(resultsdirectory, "/plots/UMAP/NUPR1_splitbyCondition_NoLegend.pdf", sep = "/"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
+ggsave(FP, filename = paste(resultsdirectory, "/plots/UMAP/NUPR1_splitbyCondition_NoLegend.pdf", sep = "/"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
 
 ## SUPP FIGURE 6A: Violin Plot showing expression of NUPR1 across quadrants. ####
 GBM_700cells$Condition <- factor(GBM_700cells$Condition, levels = c("CSF","TME"))
@@ -1408,7 +1408,7 @@ umap
 ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_MESlike_splitbyCondition_NoLegend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
 ```
 
-```{r}
+```{xxx}
 ##Load differential expression genes
 set.seed(1)   
 file_names <- list.files(paste0(resultsdirectory,"/Differential Expression"), pattern = "CSF_Markers_*", full.names = F)
@@ -1423,17 +1423,27 @@ for(i in 1:length(CSF_markers)){
 
 ##Load marker list
 NUPR1_markers <- read.csv(file = paste0(datadirectory, "/reference_sheets/NUPR1_pathway_markers.csv"))
-NUPR1_markers <- NUPR1_markers[,-c(1:7)]
+## get gene descriptions for NUPR1 associated genes
+library(biomaRt)
+mart <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl", host = "www.ensembl.org")
+genes_list <- getBM(
+  filters = "external_gene_name", 
+  attributes = c("external_gene_name","wikigene_description"),
+  values = NUPR1_markers$all_genes,
+  mart = mart)
+markers <- NUPR1_markers[,8:10]
+markers <- merge(markers, genes_list, by.x = 'all_genes', by.y = "external_gene_name", all = TRUE)
+rownames(markers) <- markers$all_genes
 
 L2FC_NUPR1markers <- lapply(CSF_markers[3:12], function(x){
-  x[NUPR1_markers$all_genes,]
+  x[markers$all_genes,]
 })
 
 ##Create a matrix containing the top genes from the differential expression of all cells
-Fold_change <- data.frame(matrix(ncol = 10, nrow=44))
-col_names <- c("111","134", "159", "448", "468", "469","497","BAH1","MN1", "HW1")
+Fold_change <- data.frame(matrix(ncol = 11, nrow=52))
+col_names <- c("111","134", "159", "448", "468", "469","497","BAH1","MN1", "HW1","function_1")
 colnames(Fold_change) <- col_names
-rownames(Fold_change) <- NUPR1_markers$all_genes
+rownames(Fold_change) <- markers$all_genes 
 
 for(i in 1:length(L2FC_NUPR1markers)){
   names(L2FC_NUPR1markers)[[i]] <- col_names[[i]]
@@ -1441,21 +1451,31 @@ for(i in 1:length(L2FC_NUPR1markers)){
   Fold_change[i] <- L2FC_NUPR1markers[[i]]$avg_log2FC
 }
 Fold_change <- Fold_change[rowSums(is.na(Fold_change)) != ncol(Fold_change),]
+markers_sub <- rownames(Fold_change)
+markers_sub <- markers[markers_sub,]
+Fold_change$function_1 <- markers_sub$function_1
 
 ## Function to caluclate a distance matrix by excluding NA values
 dist_no_na <- function(Fold_change) {
-    edist <- dist(Fold_change) ## calulcate dist
+    edist <- dist(Fold_change[,1:10]) ## calulcate dist
     edist[which(is.na(edist))] <- max(edist, na.rm=TRUE) * 1.1 ## get the maximum value, multiply by 1.1 and add to NA values
     return(edist)
 }
 
-Dist <- dist_no_na(Fold_change)
+Dist <- dist_no_na(Fold_change[,1:10])
 Clust <- hclust(Dist)
 plot(Clust)
 
 pdf(file = paste0(resultsdirectory, "/plots/Heatmap/Heatmap_NUPR1_associated_genes_DE_percellline.pdf"), width = 12, height = 12, onefile = T) ##Run to save as pdf
 color_h <- colorRamp2(c(-1,0,2.5), c("blue","white","red"))
-h <- Heatmap(as.matrix(Fold_change), show_row_names = TRUE,
+function_col = structure(brewer.pal(length(unique(markers$function_1)), "Set3"), 
+    names = unique(markers$function_1))
+
+bottom_anno <- HeatmapAnnotation(blank = anno_empty(border = FALSE))
+description <- rowAnnotation(text = anno_text(Fold_change$function_1, location = 0, just = "left"),
+    row_km = 3))
+
+h <- Heatmap(as.matrix(Fold_change[,1:10]), show_row_names = TRUE,
              show_column_names = T, 
              cluster_columns = T,
              ##cluster_columns = function(m) as.dendrogram(Clust), 
@@ -1469,89 +1489,134 @@ h <- Heatmap(as.matrix(Fold_change), show_row_names = TRUE,
              col = color_h, ##update colors in previous step
              use_raster = FALSE, 
              raster_device = "png",
+             row_names_side = "left",
              ##top_annotation = column_ha,
              ##bottom_annotation = c(bottom_anno,bottom),
              na_col = "grey89",
              row_names_gp =  gpar(fontsize = 18),
              rect_gp = gpar(col = "white", lwd = 1),
              cell_fun = function(j, i, x, y, width, height, fill) {
-       grid.text(sprintf("%.1f", Fold_change[i, j]), x, y, gp = gpar(fontsize = 10))},
+       grid.text(sprintf("%.1f", Fold_change[,1:10][i, j]), x, y, gp = gpar(fontsize = 10))},
             heatmap_legend_param = list(
              title = "Log2FC", at = c(-1,0,1,2)))
-h
+h + Heatmap(Fold_change$function_1, name = "function", col = function_col)
 dev.off()
 
-
-## get gene descriptions for NUPR1 associated genes
-mart <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl", host = "www.ensembl.org")
-genes_list <- getBM(
-  filters = "external_gene_name", 
-  attributes = c("external_gene_name","wikigene_description"),
-  values = NUPR1_markers$all_genes,
-  mart = mart)
-markers <- na.omit(merge(NUPR1_markers, genes_list, by.x = 'all_genes', by.y = "external_gene_name", all = TRUE))
-
-## Extract raw matrix and average expression matrix 
-GBM_matrix_raw <- GBM_700cells[["RNA"]]@counts
-GBM_matrix_raw <- as.matrix(GBM_matrix_raw[which(rownames(GBM_matrix_raw) %in% markers$all_genes),])
-GBM_matrix_raw <- GBM_matrix_raw[rowSums(GBM_matrix_raw) > 0,]
-
-GBM_matrix_scaled <- GBM_700cells[["RNA"]]@data
-GBM_matrix_scaled <- as.matrix(GBM_matrix_scaled[which(rownames(GBM_matrix_scaled) %in% markers$all_genes),])
-GBM_matrix_scaled <- GBM_matrix_scaled[rowSums(GBM_matrix_scaled) > 0,]
-
-Idents(GBM_700cells) <- GBM_700cells$Condition_PatientID
-GBM_matrix_avg <- AverageExpression(GBM_700cells, slot = "data")
-GBM_matrix_avg <- as.data.frame(GBM_matrix_avg[[1]])
-GBM_matrix_avg <- GBM_matrix_avg[NUPR1_markers$all_genes,]
-GBM_matrix_avg <- na.omit(GBM_matrix_avg)
-GBM_matrix_avg <- split(GBM_matrix_avg, c("TME","CSF"))
-Heatmap <- as.matrix(t(scale(t(GBM_matrix_avg))))
-
-split.data.frame <- function(x){
-  i <- x[,grepl("TME", names(x))]
-  y <- x[,grepl("CSF", names(x))]
-  z <- ls(i,y)
-}
-
-split.data.frame(GBM_matrix_avg)
-
+### Generate annotations for the heatmap ####
 GBM_metadata <- GBM_700cells@meta.data
 GBM_metadata <- GBM_metadata[,-c(1:3,7:26,28:31,34:36,39:40,42:48,50:52,55)]
 
 proportions_neftel <- GBM_metadata %>%
-  group_by(Condition_PatientID, Quadrant) %>%
+  group_by(Condition, PatientID, Quadrant) %>%
   summarise(n = n()) %>%
   mutate(freq = (n/sum(n))*100)
+proportions_neftel$freq <- round(proportions_neftel$freq, 0)
 
-proportions_neftel$freq <- round(proportions_neftel$freq, 2)
-
-ggplot(proportions_neftel, aes(x = "", y = proportions_neftel$freq, fill = proportions_neftel$Quadrant)) +
+## Create pie charts of cell state proportions
+pie <- ggplot(proportions_neftel, aes(x = "", y = proportions_neftel$freq, fill = proportions_neftel$Quadrant)) +
   geom_col() +
-  ##geom_text(aes(label = proportions_neftel$freq), position = position_stack(vjust = 1)) +
+  geom_text(aes(label = proportions_neftel$freq), position = position_stack(vjust = 0), color = "white") +
   coord_polar(theta = "y") +
   theme_void() +
   facet_grid(Condition ~ PatientID) +
   scale_fill_manual(values = c("#FECC66","#FB0207","#804003","#0F80FF")) + theme(legend.position = "none")
+pie
+ggsave(pie, filename = paste(resultsdirectory, "plots/Heatmap/Piecharts_CellState.pdf", sep = "/"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
 
 proportions_cycling <- GBM_metadata %>%
   group_by(Condition, PatientID, Cell_Cycle) %>%
   summarise(n = n()) %>%
   mutate(freq = (n/sum(n))*100)
-proportions_cycling
+proportions_cycling$freq <- round(proportions_cycling$freq, 0)
 
-ggplot(proportions_cycling, aes(x = "", y = proportions_cycling$freq, fill = proportions_cycling$Cell_Cycle)) +
+## Create pie charts of cell_cycle  proportions
+pie <- ggplot(proportions_cycling, aes(x = "", y = proportions_cycling$freq, fill = proportions_cycling$Cell_Cycle)) +
   geom_col() +
-  ##geom_text(aes(label = proportions_neftel$freq), position = position_stack(vjust = 1)) +
+  geom_text(aes(label = proportions_cycling$freq), position = position_stack(vjust = 0), color = "white") +
   coord_polar(theta = "y") +
   theme_void() +
   facet_grid(Condition ~ PatientID) +
   scale_fill_manual(values = c("blue","red")) + theme(legend.position = "none")
+ggsave(pie, filename = paste(resultsdirectory, "plots/Heatmap/Piecharts_Cycling.pdf", sep = "/"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
 
 GBM_metadata <- GBM_metadata[!duplicated(GBM_metadata$Condition_PatientID),]
 GBM_metadata <- GBM_metadata[,-c(4:13)]
 
-## FIGURE 5B: Heatmap of top 20 genes ####
+## Heatmap of NUPR1 markers ####
+
+
+## Extract average read counts per patient_condition
+all.genes <- rownames(GBM_700cells)
+GBM_700cells <- ScaleData(GBM_700cells, features = all.genes)
+Idents(GBM_700cells) <- GBM_700cells$Condition_PatientID
+
+##Idents(GBM_700cells) <- GBM_700cells$Condition
+GBM_matrix_avg <- AverageExpression(GBM_700cells, slot = "counts")
+GBM_matrix_avg <- as.data.frame(GBM_matrix_avg[[1]])
+GBM_matrix_avg <- GBM_matrix_avg[NUPR1_markers$all_genes,]
+GBM_matrix_avg <- GBM_matrix_avg[rowSums(is.na(GBM_matrix_avg)) != ncol(GBM_matrix_avg),]
+GBM_matrix_avg <- as.data.frame(t(GBM_matrix_avg))
+GBM_matrix_avg$sample <- rownames(GBM_matrix_avg)
+GBM_matrix_avg <- GBM_matrix_avg %>% separate(sample, c("Patient","Condition"), '_')
+GBM_matrix_avg <- split(GBM_matrix_avg, GBM_matrix_avg$Patient)
+write.csv(as.data.frame(GBM_matrix_avg), file = paste0(resultsdirectory, "/Differential Expression/GBM_Average_Matrix.csv"), quote = FALSE)
+
+
+x <- lapply(GBM_matrix_avg, function(x){
+  as.data.frame(t(x))
+  x[-c(51:52),]
+})
+
+for(i in 1:length(x)){
+  x[[i]] <- x[[i]][,1]/x[[i]][,2]
+}
+
+### Run this if you want to process TME and CSF separately #####
+TME_avg <- GBM_matrix_avg[,grepl("TME", colnames(GBM_matrix_avg))]
+TME_avg$Average_TME <- rowMeans(TME_avg)
+CSF_avg <- GBM_matrix_avg[,grepl("CSF", colnames(GBM_matrix_avg))]
+CSF_avg$Average_CSF <- rowMeans(CSF_avg)
+
+Average_matrix <- GBM_matrix_avg[rowSums(is.na(GBM_matrix_avg)) != ncol(GBM_matrix_avg),]
+
+mean_per_gene <- function(x){
+  x/TME_avg$Average_TME
+}
+Average_matrix <- mean_per_gene(Average_matrix)
+Heatmap <- data.frame(log2(Average_matrix+1))
+
+Average_matrix <- list(TME_avg,CSF_avg)
+names(Average_matrix) <- c("TME","CSF")
+
+##col_names <- c("BAH1","MN1", "HW1","111","134", "159", "448", "468", "469","497")
+for(i in 1:length(Average_matrix)){
+  Average_matrix[[i]] <- Average_matrix[[i]][,sort(colnames(Average_matrix[[i]]))]
+  ##colnames(Average_matrix[[i]]) <- col_names
+  Average_matrix[[i]] <- Average_matrix[[i]][rowSums(is.na(Average_matrix[[i]])) != ncol(Average_matrix[[i]]),]
+  ##Average_matrix[[i]] <- as.matrix(t(scale(t(Average_matrix[[i]]))))
+}
+
+Heatmap <- cbind(Average_matrix[[1]], Average_matrix[[2]])
+
+#### Scale matrix ####
+Heatmap <- data.frame(t(scale(t(GBM_matrix_avg))))
+##Heatmap <- GBM_matrix_avg
+##Heatmap <- data.frame(scale(GBM_matrix_avg))
+markers <- na.omit(markers[rownames(Heatmap),])
+Heatmap <- Heatmap[rowSums(is.na(Heatmap)) != ncol(Heatmap),]
+Heatmap$description <- markers$function_1
+
+## Function to caluclate a distance matrix by excluding NA values
+dist_no_na <- function(Heatmap) {
+    edist <- dist(Heatmap[,1:20]) ## calulcate dist
+    edist[which(is.na(edist))] <- max(edist, na.rm=TRUE) * 1.1 ## get the maximum value, multiply by 1.1 and add to NA values
+    return(edist)
+}
+
+Dist <- dist_no_na(Heatmap[,1:20])
+Clust <- hclust(Dist)
+plot(Clust)
+
 library(RColorBrewer)
 library(ComplexHeatmap)
 library(circlize)
@@ -1561,40 +1626,22 @@ library(dendsort)
 library(colorspace)
 library(stats)
 
-##color_h <- colorRamp2(c(-5,-2.5,-1,0,2.5,5), c("blue","deepskyblue","deepskyblue","white","red","firebrick"))
-proportions_neftel <- as.data.frame(proportions_neftel)
-proportions_neftel <- reshape2::dcast(proportions_neftel, Condition_PatientID ~ Quadrant)
-row.names(proportions_neftel) <- proportions_neftel$Condition_PatientID
-proportions_neftel$Condition_PatientID <- NULL
-head(proportions_neftel)
-proportions_neftel[is.na(proportions_neftel)] <- 0
-proportions_neftel <- round(proportions_neftel, digits = 1)
-names <- rownames(proportions_neftel)
-Heatmap <- Heatmap[,names]
-row.names(proportions_neftel) == colnames(Heatmap) ## TRUE
+color_h <- colorRamp2(c(-1,0,1,2), c("blue","white","red","firebrick"))
+color_h <- colorRamp2(c(-1,0,2.5), c("blue","white","red"))
+##color_h <- colorRamp2(c(0,2,4,6,8), c("white","red","red","firebrick","firebrick"))
+bottom_anno <- HeatmapAnnotation(blank = anno_empty(border = FALSE))
+description <- rowAnnotation(text = anno_text(Heatmap$description, location = 0, just = "left"),
+    row_km = 3))
 
-proportions_cycling <- as.data.frame(proportions_cycling)
-proportions_cycling <- reshape2::dcast(proportions_cycling, Condition_PatientID ~ Cell_Cycle)
-row.names(proportions_cycling) <- proportions_cycling$Condition_PatientID
-proportions_cycling$Condition_PatientID <- NULL
-head(proportions_cycling)
-proportions_cycling[is.na(proportions_cycling)] <- 0
-proportions_cycling <- round(proportions_cycling, digits = 1)
-row.names(proportions_cycling) == colnames(Heatmap) ##TRUE
-
-bottom_anno <- HeatmapAnnotation(quadrant_persample = anno_barplot(proportions_neftel, gp = gpar(fill = c("#FECC66","#FB0207","#804003","#0F80FF"))))
-
-bottom <- HeatmapAnnotation(cycling_persample = anno_barplot(proportions_cycling, gp = gpar(fill = c("blue","red"))))
-
-column_ha <- HeatmapAnnotation(Condition = anno_empty(border = T))
-
-pdf(file = paste0(resultsdirectory, "plots/Heatmap/Heatmap_2_Downsampled.pdf"), width = 12, height = 12, onefile = T) ##Run to save as pdf
-h <- Heatmap(as.matrix(Fold_change), show_row_names = TRUE,
+pdf(file = paste0(resultsdirectory, "/plots/Heatmap/Heatmap_Scaled_Avg_Counts.pdf"), width = 12, height = 12, onefile = T) ##Run to save as pdf
+h <- Heatmap(as.matrix(Heatmap[,1:20]), 
+             ##as.matrix(Heatmap[,1:2]),
+             show_row_names = T,
              show_column_names = T, 
              cluster_columns = T,
              ##cluster_columns = function(m) as.dendrogram(Clust), 
-             column_dend_reorder = F,
-             row_dend_reorder = F,
+             column_dend_reorder = T,
+             row_dend_reorder = T,
              cluster_rows = function(m) as.dendrogram(Clust),
              show_row_dend = TRUE, 
              show_column_dend = TRUE,
@@ -1602,19 +1649,28 @@ h <- Heatmap(as.matrix(Fold_change), show_row_names = TRUE,
              row_dend_width = unit(2, "cm"),
              col = color_h, ##update colors in previous step
              use_raster = FALSE, 
+             top_annotation = bottom_anno,
              raster_device = "png",
-             ##top_annotation = column_ha,
-             ##bottom_annotation = c(bottom_anno,bottom),
+             bottom_annotation = bottom_anno,
              na_col = "grey",
+            row_names_side = "left",
              row_names_gp =  gpar(fontsize = 18),
              rect_gp = gpar(col = "white", lwd = 1),
              cell_fun = function(j, i, x, y, width, height, fill) {
-       grid.text(sprintf("%.1f", Fold_change[i, j]), x, y, gp = gpar(fontsize = 10))},
+       grid.text(sprintf("%.1f", Heatmap[,1:20][i, j]), x, y, gp = gpar(fontsize = 10))},
             heatmap_legend_param = list(
-             title = "Log2FC", at = c(-1,0,1,2)))
-h
+             title = "Scaled average counts", at = c(-1,0,1,2)))
+h + Heatmap(Heatmap$description, name = "function", col = function_col)
 
 dev.off()
 
+## Extract raw matrix and average expression matrix 
+GBM_matrix_raw <- GBM_700cells[["RNA"]]@counts
+GBM_matrix_raw <- as.matrix(GBM_matrix_raw[which(rownames(GBM_matrix_raw) %in% NUPR1_markers$all_genes),])
+GBM_matrix_raw <- GBM_matrix_raw[rowSums(GBM_matrix_raw) > 0,]
+
+GBM_matrix_scaled <- GBM_700cells[["RNA"]]@data
+GBM_matrix_scaled <- as.matrix(GBM_matrix_scaled[which(rownames(GBM_matrix_scaled) %in% NUPR1_markers$all_genes),])
+GBM_matrix_scaled <- GBM_matrix_scaled[rowSums(GBM_matrix_scaled) > 0,]
 ```
 
