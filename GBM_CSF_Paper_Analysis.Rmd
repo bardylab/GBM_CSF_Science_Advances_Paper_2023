@@ -2218,17 +2218,6 @@ hm <- Heatmap(do_mat,
        heatmap_legend_param = list(title = "Similarity"))
 draw(hm)
 dev.off()
-
-#####
-enrichDO_results$new_description <- ifelse(enrichDO_results$Cluster_louvain == "1", "cell migration", ifelse(enrichDO_results$Cluster_louvain == "2", "response to extracellular signals", ifelse(enrichDO_results$Cluster_louvain == "3", "metabolic processes", 
-ifelse(enrichDO_results$Cluster_louvain == "4", "growth and development", 
-ifelse(enrichDO_results$Cluster_louvain == "5", "regulation of apoptotic processes", 
-ifelse(enrichDO_results$Cluster_louvain == "6", "endoplasmic reticulum stress response",
-ifelse(enrichDO_results$Cluster_louvain == "7", "negative growth regulation","cell division")))))))
-
-enrichDO <- pairwise_termsim(enrichDO)
-heatplot(enrichDO, foldChange = geneList, showCategory = 50)
-cnetplot(enrichDO, foldChange=geneList, circular = TRUE, showCategory = 50)
 ```
 
 ```{Assessing expression of NUPR1 pathway markers}
