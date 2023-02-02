@@ -16,9 +16,9 @@ script_path <- rstudioapi::getActiveDocumentContext()$path
 script_dir <- dirname(script_path)
 setwd(script_dir)
 workingdirectory <- paste0(script_dir)
-datadirectory <- paste0(workingdirectory, "/data")
+datadirectory <- paste0(workingdirectory,"/data")
 resultsdirectory <- paste0(workingdirectory, "/results")
-cell_line_directory <- paste0(datadirectory, "/RData")
+cell_line_directory <- paste0(datadirectory,"/RData")
 ##dir.create(resultsdirectory)
 
 ## Load required libraries
@@ -46,6 +46,230 @@ if(!require(ggpointdensity)){
   install.packages("ggpointdensity")
   library(ggpointdensity)
 }
+if(!require(fgsea)){
+ BiocManager::install("fgsea")
+  library(fgsea)
+}
+if (!requireNamespace("BiocManager", quietly=TRUE))
+    install.packages("BiocManager")
+BiocManager::install("simplifyEnrichment")
+##For the latest version
+library(devtools)
+install_github("jokergoo/simplifyEnrichment")
+```
+
+1b.  **Load functions for downstream analyses**
+```{Function for DoMultiBarHeatmap}
+# Create function for DoHeatmap with multiple annotation
+suppressPackageStartupMessages({
+  library(rlang)
+})
+DoMultiBarHeatmap <- function (object, 
+                               features = NULL, 
+                               cells = NULL, 
+                               group.by = "ident", 
+                               additional.group.by = NULL, 
+                               additional.group.sort.by = NULL, 
+                               cols.use = NULL,
+                               group.bar = TRUE, 
+                               disp.min = -2.5, 
+                               disp.max = NULL, 
+                               slot = "scale.data", 
+                               assay = NULL, 
+                               label = TRUE, 
+                               size = 5.5, 
+                               hjust = 0, 
+                               angle = 45, 
+                               raster = TRUE, 
+                               draw.lines = TRUE, 
+                               lines.width = NULL, 
+                               group.bar.height = 0.02, 
+                               combine = TRUE) 
+{
+  cells <- cells %||% colnames(x = object)
+  if (is.numeric(x = cells)) {
+    cells <- colnames(x = object)[cells]
+  }
+  assay <- assay %||% DefaultAssay(object = object)
+  DefaultAssay(object = object) <- assay
+  features <- features %||% VariableFeatures(object = object)
+  ## Why reverse???
+  features <- rev(x = unique(x = features))
+  disp.max <- disp.max %||% ifelse(test = slot == "scale.data", 
+                                   yes = 2.5, no = 6)
+  possible.features <- rownames(x = GetAssayData(object = object, 
+                                                 slot = slot))
+  if (any(!features %in% possible.features)) {
+    bad.features <- features[!features %in% possible.features]
+    features <- features[features %in% possible.features]
+    if (length(x = features) == 0) {
+      stop("No requested features found in the ", slot, 
+           " slot for the ", assay, " assay.")
+    }
+    warning("The following features were omitted as they were not found in the ", 
+            slot, " slot for the ", assay, " assay: ", paste(bad.features, 
+                                                             collapse = ", "))
+  }
+  
+  if (!is.null(additional.group.sort.by)) {
+    if (any(!additional.group.sort.by %in% additional.group.by)) {
+      bad.sorts <- additional.group.sort.by[!additional.group.sort.by %in% additional.group.by]
+      additional.group.sort.by <- additional.group.sort.by[additional.group.sort.by %in% additional.group.by]
+      if (length(x = bad.sorts) > 0) {
+        warning("The following additional sorts were omitted as they were not a subset of additional.group.by : ", 
+                paste(bad.sorts, collapse = ", "))
+      }
+    }
+  }
+  
+  data <- as.data.frame(x = as.matrix(x = t(x = GetAssayData(object = object, 
+                                                             slot = slot)[features, cells, drop = FALSE])))
+  
+  object <- suppressMessages(expr = StashIdent(object = object, 
+                                               save.name = "ident"))
+  group.by <- group.by %||% "ident"
+  groups.use <- object[[c(group.by, additional.group.by[!additional.group.by %in% group.by])]][cells, , drop = FALSE]
+  plots <- list()
+  for (i in group.by) {
+    data.group <- data
+    if (!is_null(additional.group.by)) {
+      additional.group.use <- additional.group.by[additional.group.by!=i]  
+      if (!is_null(additional.group.sort.by)){
+        additional.sort.use = additional.group.sort.by[additional.group.sort.by != i]  
+      } else {
+        additional.sort.use = NULL
+      }
+    } else {
+      additional.group.use = NULL
+      additional.sort.use = NULL
+    }
+    
+    group.use <- groups.use[, c(i, additional.group.use), drop = FALSE]
+    
+    for(colname in colnames(group.use)){
+      if (!is.factor(x = group.use[[colname]])) {
+        group.use[[colname]] <- factor(x = group.use[[colname]])
+      }  
+    }
+    
+    if (draw.lines) {
+      lines.width <- lines.width %||% ceiling(x = nrow(x = data.group) * 
+                                                0.0025)
+      placeholder.cells <- sapply(X = 1:(length(x = levels(x = group.use[[i]])) * 
+                                           lines.width), FUN = function(x) {
+                                             return(Seurat:::RandomName(length = 20))
+                                           })
+      placeholder.groups <- data.frame(rep(x = levels(x = group.use[[i]]), times = lines.width))
+      group.levels <- list()
+      group.levels[[i]] = levels(x = group.use[[i]])
+      for (j in additional.group.use) {
+        group.levels[[j]] <- levels(x = group.use[[j]])
+        placeholder.groups[[j]] = NA
+      }
+      
+      colnames(placeholder.groups) <- colnames(group.use)
+      rownames(placeholder.groups) <- placeholder.cells
+      
+      group.use <- sapply(group.use, as.vector)
+      rownames(x = group.use) <- cells
+      
+      group.use <- rbind(group.use, placeholder.groups)
+      
+      for (j in names(group.levels)) {
+        group.use[[j]] <- factor(x = group.use[[j]], levels = group.levels[[j]])
+      }
+      
+      na.data.group <- matrix(data = NA, nrow = length(x = placeholder.cells), 
+                              ncol = ncol(x = data.group), dimnames = list(placeholder.cells, 
+                                                                           colnames(x = data.group)))
+      data.group <- rbind(data.group, na.data.group)
+    }
+    
+    order_expr <- paste0('order(', paste(c(i, additional.sort.use), collapse=','), ')')
+    group.use = with(group.use, group.use[eval(parse(text=order_expr)), , drop=F])
+    
+    plot <- Seurat:::SingleRasterMap(data = data.group, raster = raster, 
+                                     disp.min = disp.min, disp.max = disp.max, feature.order = features, 
+                                     cell.order = rownames(x = group.use), group.by = group.use[[i]])
+    
+    if (group.bar) {
+      pbuild <- ggplot_build(plot = plot)
+      group.use2 <- group.use
+      cols <- list()
+      na.group <- Seurat:::RandomName(length = 20)
+      for (colname in rev(x = colnames(group.use2))) {
+        if (colname == i) {
+          colid = paste0('Identity (', colname, ')')
+        } else {
+          colid = colname
+        }
+        
+        # Default
+        cols[[colname]] <- c(scales::hue_pal()(length(x = levels(x = group.use[[colname]]))))  
+        
+        #Overwrite if better value is provided
+        if (!is_null(cols.use[[colname]])) {
+          req_length = length(x = levels(group.use))
+          if (length(cols.use[[colname]]) < req_length){
+            warning("Cannot use provided colors for ", colname, " since there aren't enough colors.")
+          } else {
+            if (!is_null(names(cols.use[[colname]]))) {
+              if (all(levels(group.use[[colname]]) %in% names(cols.use[[colname]]))) {
+                cols[[colname]] <- as.vector(cols.use[[colname]][levels(group.use[[colname]])])
+              } else {
+                warning("Cannot use provided colors for ", colname, " since all levels (", paste(levels(group.use[[colname]]), collapse=","), ") are not represented.")
+              }
+            } else {
+              cols[[colname]] <- as.vector(cols.use[[colname]])[c(1:length(x = levels(x = group.use[[colname]])))]
+            }
+          }
+        }
+        
+        # Add white if there's lines
+        if (draw.lines) {
+          levels(x = group.use2[[colname]]) <- c(levels(x = group.use2[[colname]]), na.group)  
+          group.use2[placeholder.cells, colname] <- na.group
+          cols[[colname]] <- c(cols[[colname]], "#FFFFFF")
+        }
+        names(x = cols[[colname]]) <- levels(x = group.use2[[colname]])
+        
+        y.range <- diff(x = pbuild$layout$panel_params[[1]]$y.range)
+        y.pos <- max(pbuild$layout$panel_params[[1]]$y.range) + y.range * 0.015
+        y.max <- y.pos + group.bar.height * y.range
+        pbuild$layout$panel_params[[1]]$y.range <- c(pbuild$layout$panel_params[[1]]$y.range[1], y.max)
+        
+        plot <- suppressMessages(plot + 
+                                   annotation_raster(raster = t(x = cols[[colname]][group.use2[[colname]]]),  xmin = -Inf, xmax = Inf, ymin = y.pos, ymax = y.max) + 
+                                   annotation_custom(grob = grid::textGrob(label = colid, hjust = 0, gp = gpar(cex = 0.75)), ymin = mean(c(y.pos, y.max)), ymax = mean(c(y.pos, y.max)), xmin = Inf, xmax = Inf) +
+                                   coord_cartesian(ylim = c(0, y.max), clip = "off")) 
+        
+        if ((colname == i) && label) {
+          x.max <- max(pbuild$layout$panel_params[[1]]$x.range)
+          x.divs <- pbuild$layout$panel_params[[1]]$x.major %||% pbuild$layout$panel_params[[1]]$x$break_positions()
+          group.use$x <- x.divs
+          label.x.pos <- tapply(X = group.use$x, INDEX = group.use[[colname]],
+                                FUN = median) * x.max
+          label.x.pos <- data.frame(group = names(x = label.x.pos), 
+                                    label.x.pos)
+          plot <- plot + geom_text(stat = "identity", 
+                                   data = label.x.pos, aes_string(label = "group", 
+                                                                  x = "label.x.pos"), y = y.max + y.max * 
+                                     0.03 * 0.5, angle = angle, hjust = hjust, 
+                                   size = size)
+          plot <- suppressMessages(plot + coord_cartesian(ylim = c(0, 
+                                                                   y.max + y.max * 0.002 * max(nchar(x = levels(x = group.use[[colname]]))) * 
+                                                                     size), clip = "off"))
+        }
+      }
+    }
+    plot <- plot + theme(line = element_blank())
+    plots[[i]] <- plot
+  }
+  if (combine) {
+    plots <- CombinePlots(plots = plots)
+  }
+  return(plots)
+}
 ```
 
 2.  ***Load the required RData files that have previously been QC'd***
@@ -59,7 +283,7 @@ lapply(file_names, load, .GlobalEnv)
 ## Load combined datasets
 set.seed(1)
 file_names <- list.files(cell_line_directory, pattern = "GBM_*",full.names = T)
-lapply(file_names[1:2], load, .GlobalEnv) ##Make sure you load the FILTERED GBM_ALL data - they are both named 'Bardy_10x' in R
+lapply(file_names[3], load, .GlobalEnv) ##Make sure you load the FILTERED GBM_ALL data - they are both named 'Bardy_10x' in R
 rm(file_names)
 ```
 
@@ -630,7 +854,7 @@ GBM_700cells@meta.data$PatientID[which(GBM_700cells@meta.data$PatientID == "BAH1
 GBM_700cells@meta.data$Condition_PatientID[which(GBM_700cells@meta.data$Condition_PatientID == "BAH1B_CSF")] <- "BAH1_CSF"
 GBM_700cells@meta.data$Condition_PatientID[which(GBM_700cells@meta.data$Condition_PatientID == "BAH1B_TME")] <- "BAH1_TME"
 
-save(GBM_700cells, file = paste(datadirectory, "/RData/GBM_Downsampled.Rdata"))
+save(GBM_700cells, file = paste(cell_line_directory, "/RData/GBM_Downsampled.Rdata"))
 ```
 
 10. ***We scale and normalise the 'GBM_700cells' seurat object***
@@ -663,8 +887,8 @@ save(GBM_700cells, file = paste(datadirectory, "/RData/GBM_Downsampled.Rdata"))
 ##We first set the identity of the Seurat Object. 
 Idents(GBM_700cells) <- "Condition"
 ##We want to detect genes that are significantly expressed in at least 30 percent of the cells with a difference of at least 5 percent between the two groups. 
-CSF_Markers <- FindMarkers(GBM_700cells, ident.1 = "CSF", ident.2 = "TME", min.pct = 0.3, logfc.threshold = 0, min.diff.pct = 0.05) 
- ##For GSEA we do a differential expression with default paramaters. 
+CSF_Markers <- FindMarkers(GBM_700cells, ident.1 = "CSF", ident.2 = "TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05) 
+##For GSEA we do a differential expression with default paramaters. 
 CSF_Markers <- FindMarkers(GBM_700cells, ident.1 = "CSF", ident.2 = "TME", logfc.threshold = 0)
 
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
@@ -776,51 +1000,67 @@ Idents(GBM_700cells) <- "Condition_PatientID"
 CSF_Markers_111 <- FindMarkers(GBM_700cells, ident.1 = "SANTB00111_CSF", ident.2 = "SANTB00111_TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05)
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
 CSF_Markers_111 <- CSF_Markers_111[order(-CSF_Markers_111$avg_log2FC, CSF_Markers_111$p_val_adj),]
+##write.csv(CSF_Markers_111, file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_111_700cells_percondition_downsample_minpct0.1.csv"))
+CSF_Markers_111 <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_111_700cells_percondition_downsample_minpct0.1.csv"))
 
 
 CSF_Markers_134 <- FindMarkers(GBM_700cells, ident.1 = "SANTB00134_CSF", ident.2 = "SANTB00134_TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05)
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
 CSF_Markers_134 <- CSF_Markers_134[order(-CSF_Markers_134$avg_log2FC, CSF_Markers_134$p_val_adj),]
-
+write.csv(CSF_Markers_134, file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_134_700cells_percondition_downsample_minpct0.1.csv"))
+CSF_Markers_134 <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_134_700cells_percondition_downsample_minpct0.1.csv"))
 
 CSF_Markers_159 <- FindMarkers(GBM_700cells, ident.1 = "SANTB00159_CSF", ident.2 = "SANTB00159_TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05)
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
 CSF_Markers_159 <- CSF_Markers_159[order(-CSF_Markers_159$avg_log2FC, CSF_Markers_159$p_val_adj),]
+write.csv(CSF_Markers_159, file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_159_700cells_percondition_downsample_minpct0.1.csv"))
+CSF_Markers_159 <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_159_700cells_percondition_downsample_minpct0.1.csv"))
 
 
 CSF_Markers_448 <- FindMarkers(GBM_700cells, ident.1 = "SANTB00448_CSF", ident.2 = "SANTB00448_TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05)
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
 CSF_Markers_448 <- CSF_Markers_448[order(-CSF_Markers_448$avg_log2FC, CSF_Markers_448$p_val_adj),]
+write.csv(CSF_Markers_448, file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_448_700cells_percondition_downsample_minpct0.1.csv"))
+CSF_Markers_448 <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_448_700cells_percondition_downsample_minpct0.1.csv"))
 
 
 CSF_Markers_468 <- FindMarkers(GBM_700cells, ident.1 = "SANTB00468_CSF", ident.2 = "SANTB00468_TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05)
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
 CSF_Markers_468 <- CSF_Markers_468[order(-CSF_Markers_468$avg_log2FC, CSF_Markers_468$p_val_adj),]
+write.csv(CSF_Markers_468, file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_468_700cells_percondition_downsample_minpct0.1.csv"))
+CSF_Markers_468 <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_468_700cells_percondition_downsample_minpct0.1.csv"))
 
 
 CSF_Markers_469 <- FindMarkers(GBM_700cells, ident.1 = "SANTB00469_CSF", ident.2 = "SANTB00469_TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05)
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
 CSF_Markers_469 <- CSF_Markers_469[order(-CSF_Markers_469$avg_log2FC, CSF_Markers_469$p_val_adj),]
+write.csv(CSF_Markers_469, file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_469_700cells_percondition_downsample_minpct0.1.csv"))
+CSF_Markers_469 <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_469_700cells_percondition_downsample_minpct0.1.csv"))
 
 
 CSF_Markers_497 <- FindMarkers(GBM_700cells, ident.1 = "SANTB00497_CSF", ident.2 = "SANTB00497_TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05)
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
 CSF_Markers_497 <- CSF_Markers_497[order(-CSF_Markers_497$avg_log2FC, CSF_Markers_497$p_val_adj),]
-
+write.csv(CSF_Markers_497, file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_497_700cells_percondition_downsample_minpct0.1.csv"))
+CSF_Markers_497 <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_497_700cells_percondition_downsample_minpct0.1.csv"))
 
 CSF_Markers_BAH1 <- FindMarkers(GBM_700cells, ident.1 = "BAH1_CSF", ident.2 = "BAH1_TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05)
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
 CSF_Markers_BAH1 <- CSF_Markers_BAH1[order(-CSF_Markers_BAH1$avg_log2FC, CSF_Markers_BAH1$p_val_adj),]
-
+write.csv(CSF_Markers_BAH1, file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_BAH1_700cells_percondition_downsample_minpct0.1.csv"))
+CSF_Markers_BAH1 <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_BAH1_700cells_percondition_downsample_minpct0.1.csv"))
 
 CSF_Markers_HW1 <- FindMarkers(GBM_700cells, ident.1 = "HW1_CSF", ident.2 = "HW1_TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05)
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
 CSF_Markers_HW1 <- CSF_Markers_HW1[order(-CSF_Markers_HW1$avg_log2FC, CSF_Markers_HW1$p_val_adj),]
-
+write.csv(CSF_Markers_HW1, file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_HW1_700cells_percondition_downsample_minpct0.1.csv"))
+CSF_Markers_HW1 <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_HW1_700cells_percondition_downsample_minpct0.1.csv"))
 
 CSF_Markers_MN1 <- FindMarkers(GBM_700cells, ident.1 = "MN1_CSF", ident.2 = "MN1_TME", min.pct = 0.1, logfc.threshold = 0, min.diff.pct = 0.05)
 ##Order CSF and TME markers by descending avg_logFC and increasing adjusted p-value
 CSF_Markers_MN1 <- CSF_Markers_MN1[order(-CSF_Markers_MN1$avg_log2FC, CSF_Markers_MN1$p_val_adj),]
+write.csv(CSF_Markers_MN1, file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_MN1_700cells_percondition_downsample_minpct0.1.csv"))
+CSF_Markers_MN1 <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/CSF_Markers_HW1_700cells_percondition_downsample_minpct0.1.csv"))
 
 ##Create a matrix containing the top genes from the differential expression of all cells
 Fold_change <- data.frame(matrix(ncol = 10, nrow=3585))
@@ -908,7 +1148,7 @@ MES_Markers <-FindMarkers(GBM_700cells, ident.1 = "MESlike_CSF", ident.2 = "MESl
 write.csv(MES_Markers, file = paste0(resultsdirectory,"/Differential Expression/Downsampled_MES_Markers.csv"))
 ```
 
-***We will now visualise analysed data. i. FIGURE 3 and SUPP FIGURE 3.***
+i. ***We will now visualise analysed data. i. FIGURE 3 and SUPP FIGURE 3.***
 ```{RNA seq Plots for Figure 3 and Supp Figure 3}
 ## FIGURE 3D AND E: Proliferation scatter plots with ggplot2. ####
 ## geom_pointdenisty from the ggpointdensity package (recently developed by Lukas Kremer and Simon Anders (2019)) allows you visualize density and individual data points at the same time
@@ -1124,6 +1364,7 @@ iii. ***FIGURE 5 and SUPP FIGURE 5.***
 
 ```{RNA seq Plots for Figure 5 and Supp Figure 5}
 ### FIGURE 5A: Volcano Plot for all cell lines ####
+##CSF_Markers <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/All_CSF_Markers_700cells_percondition_downsample-minpct0.1.csv"))
 CSF_Markers$p_val_new <- CSF_Markers$p_val_adj
 CSF_Markers$p_val_new[which(CSF_Markers$p_val_adj == 0)] <- 1e-304
 CSF_Markers$log10p_adj <- -log10(CSF_Markers$p_val_new)
@@ -1131,13 +1372,13 @@ CSF_Markers$log10p_adj <- -log10(CSF_Markers$p_val_new)
 # add a column for UP and DOWN regulated genes.
 CSF_Markers$diffexpressed <- "NO"
 # if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
-CSF_Markers$diffexpressed[CSF_Markers$avg_log2FC > 0.5 & CSF_Markers$log10p_adj > 100] <- "UP"
+CSF_Markers$diffexpressed[CSF_Markers$avg_log2FC > 0.25 & CSF_Markers$log10p_adj > 100] <- "UP"
 # if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
-CSF_Markers$diffexpressed[CSF_Markers$avg_log2FC < -0.5 & CSF_Markers$log10p_adj > 100] <-  "DOWN"
+CSF_Markers$diffexpressed[CSF_Markers$avg_log2FC < -0.25 & CSF_Markers$log10p_adj > 100] <-  "DOWN"
 
 # add a column of NAs
 CSF_Markers$delabel <- NA
-CSF_Markers$delabel[CSF_Markers$top20 != "NO"] <- rownames(CSF_Markers[CSF_Markers$top20 != "NO",])
+CSF_Markers$delabel[CSF_Markers$diffexpressed != "NO"] <- rownames(CSF_Markers)[CSF_Markers$diffexpressed != "NO"]
 
 library(ggrepel)
 VP <- ggplot(CSF_Markers, aes(avg_log2FC, -log10(p_val_new), label=delabel, color=diffexpressed)) + geom_point(alpha = 0.5, size = 3) +
@@ -1155,6 +1396,7 @@ VP
 ggsave(VP, filename = paste0(resultsdirectory, "plots/Differential expression/VP_top_genes_twocolour_downsampledcells.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 
 ## FIGURE 5B: Heatmap of top 20 genes ####
+CSF_Markers <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/All_CSF_Markers_700cells_percondition_downsample-minpct0.1.csv"))
 library(RColorBrewer)
 library(ComplexHeatmap)
 library(circlize)
@@ -1301,6 +1543,7 @@ ggsave(RP, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_RP_Prolif
 ##CSF_Treatment <- read.csv(file = paste("~/Google Drive/PhD/Bardy_lab_users/Inushi/CSF_Treatment.csv"))
 ##TME_Treatment <- read.csv(file = paste("~/Google Drive/PhD/Bardy_lab_users/Inushi/TME_Treatment.csv"))
 All_Treatment <- read.csv(file = paste0(datadirectory, "/reference_sheets/TME_CSF_Treatment.csv"))
+All_Treatment <- read.csv(file = paste0(datadirectory, "/reference_sheets/TME_CSF_ki67_Treatment.csv"))
 
 rownames(All_Treatment) <- All_Treatment$X
 All_Treatment$X <- NULL
@@ -1308,20 +1551,19 @@ All_Treatment <- t(as.matrix(All_Treatment))
 
 ##Perform Clustering 
 library(factoextra)
-library(rafalib)
-Dist <- dist(t(TME_Treatment)) #Calculate Distance 
+
+## Function to caluclate a distance matrix by excluding NA values
+dist_no_na <- function(All_Treatment) {
+    edist <- dist(All_Treatment) ## calulcate dist
+    edist[which(is.na(edist))] <- max(edist, na.rm=TRUE) * 1.1 ## get the maximum value, multiply by 1.1 and add to NA values
+    return(edist)
+}
+
+Dist <- dist(t(All_Treatment)) #Calculate Distance 
 Clust <- hclust(Dist)
 plot(Clust)
-rect.hclust(Clust, h=50)
-lapply(rect.hclust(Clust, h=20), length)
-##Save split cluster dendogram
-##pdf(file = paste(resultsdirectory, "DendAllSamples_Split(7).pdf", sep = "/"), width = 24, height = 8, onefile = TRUE) ##Run to save as pdf
-clusters_FC <- rect.hclust(Clust, h=50) ##also create clusters object containing clusters and cell barcodes
+rect.hclust(Clust, h=60)
 
-ClusterList <- list()
-for(i in 1:length(clusters_FC)) {
-  ClusterList[[i]] <- names(clusters_FC[[i]])
-}
 
 library(RColorBrewer)
 library(ComplexHeatmap)
@@ -1333,12 +1575,12 @@ library(colorspace)
 
 color_h <- colorRamp2(c(0,25,50,75,100,125), c("white","blue","deepskyblue","coral","red","firebrick"))
 
-pdf(file = paste0(resultsdirectory, "/plots/Heatmap/Treatment_Heatmap.pdf"), width = 25, height = 10, onefile = T) ##Run to save as pdf
+pdf(file = paste0(resultsdirectory, "/plots/Treatment_Heatmap_wKi67.pdf"), width = 25, height = 10, onefile = T) ##Run to save as pdf
 
 h <- Heatmap(All_Treatment, show_row_names = TRUE,
              show_column_names = T, 
              cluster_columns = function(m) as.dendrogram(Clust), 
-             column_dend_reorder = F,
+             column_dend_reorder = T,
              row_dend_reorder = F,
              cluster_rows = F,
              show_row_dend = F, 
@@ -1357,7 +1599,6 @@ h <- Heatmap(All_Treatment, show_row_names = TRUE,
              heatmap_legend_param = list(
                title = "Average % Cell Survival", at = c(0,25, 50, 75, 100)))
 h
-
 dev.off()
 ```
 
@@ -1408,269 +1649,628 @@ umap
 ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_MESlike_splitbyCondition_NoLegend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
 ```
 
-```{xxx}
-##Load differential expression genes
-set.seed(1)   
-file_names <- list.files(paste0(resultsdirectory,"/Differential Expression"), pattern = "CSF_Markers_*", full.names = F)
-CSF_markers <- lapply(list.files(paste0(resultsdirectory,"/Differential Expression"), pattern = "CSF_Markers_*", full.names = F), function(x) {read.csv(paste0(resultsdirectory,"/Differential Expression/",x), header = T)})
-
-for(i in 1:length(CSF_markers)){
-  names(CSF_markers)[[i]] <- file_names[[i]]
-  rownames(CSF_markers[[i]]) <- CSF_markers[[i]]$X
- CSF_markers[[i]] <- CSF_markers[[i]][,-c(1:2,4:5,8:11)]
-  CSF_markers[["CSF_Markers_469_700cells_percondition_downsample.csv"]] <- CSF_markers[["CSF_Markers_469_700cells_percondition_downsample.csv"]][-c(5756),]
-}
-
-##Load marker list
-NUPR1_markers <- read.csv(file = paste0(datadirectory, "/reference_sheets/NUPR1_pathway_markers.csv"))
-## get gene descriptions for NUPR1 associated genes
-library(biomaRt)
-mart <- useMart(biomart = "ENSEMBL_MART_ENSEMBL", dataset = "hsapiens_gene_ensembl", host = "www.ensembl.org")
-genes_list <- getBM(
-  filters = "external_gene_name", 
-  attributes = c("external_gene_name","wikigene_description"),
-  values = NUPR1_markers$all_genes,
-  mart = mart)
-markers <- NUPR1_markers[,8:10]
-markers <- merge(markers, genes_list, by.x = 'all_genes', by.y = "external_gene_name", all = TRUE)
-rownames(markers) <- markers$all_genes
-
-L2FC_NUPR1markers <- lapply(CSF_markers[3:12], function(x){
-  x[markers$all_genes,]
-})
-
-##Create a matrix containing the top genes from the differential expression of all cells
-Fold_change <- data.frame(matrix(ncol = 11, nrow=52))
-col_names <- c("111","134", "159", "448", "468", "469","497","BAH1","MN1", "HW1","function_1")
-colnames(Fold_change) <- col_names
-rownames(Fold_change) <- markers$all_genes 
-
-for(i in 1:length(L2FC_NUPR1markers)){
-  names(L2FC_NUPR1markers)[[i]] <- col_names[[i]]
-  names(L2FC_NUPR1markers) %in% colnames(Fold_change) ##TRUE
-  Fold_change[i] <- L2FC_NUPR1markers[[i]]$avg_log2FC
-}
-Fold_change <- Fold_change[rowSums(is.na(Fold_change)) != ncol(Fold_change),]
-markers_sub <- rownames(Fold_change)
-markers_sub <- markers[markers_sub,]
-Fold_change$function_1 <- markers_sub$function_1
-
-## Function to caluclate a distance matrix by excluding NA values
-dist_no_na <- function(Fold_change) {
-    edist <- dist(Fold_change[,1:10]) ## calulcate dist
-    edist[which(is.na(edist))] <- max(edist, na.rm=TRUE) * 1.1 ## get the maximum value, multiply by 1.1 and add to NA values
-    return(edist)
-}
-
-Dist <- dist_no_na(Fold_change[,1:10])
-Clust <- hclust(Dist)
-plot(Clust)
-
-pdf(file = paste0(resultsdirectory, "/plots/Heatmap/Heatmap_NUPR1_associated_genes_DE_percellline.pdf"), width = 12, height = 12, onefile = T) ##Run to save as pdf
-color_h <- colorRamp2(c(-1,0,2.5), c("blue","white","red"))
-function_col = structure(brewer.pal(length(unique(markers$function_1)), "Set3"), 
-    names = unique(markers$function_1))
-
-bottom_anno <- HeatmapAnnotation(blank = anno_empty(border = FALSE))
-description <- rowAnnotation(text = anno_text(Fold_change$function_1, location = 0, just = "left"),
-    row_km = 3))
-
-h <- Heatmap(as.matrix(Fold_change[,1:10]), show_row_names = TRUE,
-             show_column_names = T, 
-             cluster_columns = T,
-             ##cluster_columns = function(m) as.dendrogram(Clust), 
-             column_dend_reorder = T,
-             row_dend_reorder = F,
-             cluster_rows = function(m) as.dendrogram(Clust),
-             show_row_dend = TRUE, 
-             show_column_dend = TRUE,
-             column_dend_height = unit(1, "cm"),
-             row_dend_width = unit(2, "cm"),
-             col = color_h, ##update colors in previous step
-             use_raster = FALSE, 
-             raster_device = "png",
-             row_names_side = "left",
-             ##top_annotation = column_ha,
-             ##bottom_annotation = c(bottom_anno,bottom),
-             na_col = "grey89",
-             row_names_gp =  gpar(fontsize = 18),
-             rect_gp = gpar(col = "white", lwd = 1),
-             cell_fun = function(j, i, x, y, width, height, fill) {
-       grid.text(sprintf("%.1f", Fold_change[,1:10][i, j]), x, y, gp = gpar(fontsize = 10))},
-            heatmap_legend_param = list(
-             title = "Log2FC", at = c(-1,0,1,2)))
-h + Heatmap(Fold_change$function_1, name = "function", col = function_col)
-dev.off()
-
-### Generate annotations for the heatmap ####
-GBM_metadata <- GBM_700cells@meta.data
-GBM_metadata <- GBM_metadata[,-c(1:3,7:26,28:31,34:36,39:40,42:48,50:52,55)]
-
-proportions_neftel <- GBM_metadata %>%
-  group_by(Condition, PatientID, Quadrant) %>%
-  summarise(n = n()) %>%
-  mutate(freq = (n/sum(n))*100)
-proportions_neftel$freq <- round(proportions_neftel$freq, 0)
-
-## Create pie charts of cell state proportions
-pie <- ggplot(proportions_neftel, aes(x = "", y = proportions_neftel$freq, fill = proportions_neftel$Quadrant)) +
-  geom_col() +
-  geom_text(aes(label = proportions_neftel$freq), position = position_stack(vjust = 0), color = "white") +
-  coord_polar(theta = "y") +
-  theme_void() +
-  facet_grid(Condition ~ PatientID) +
-  scale_fill_manual(values = c("#FECC66","#FB0207","#804003","#0F80FF")) + theme(legend.position = "none")
-pie
-ggsave(pie, filename = paste(resultsdirectory, "plots/Heatmap/Piecharts_CellState.pdf", sep = "/"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
-
-proportions_cycling <- GBM_metadata %>%
-  group_by(Condition, PatientID, Cell_Cycle) %>%
-  summarise(n = n()) %>%
-  mutate(freq = (n/sum(n))*100)
-proportions_cycling$freq <- round(proportions_cycling$freq, 0)
-
-## Create pie charts of cell_cycle  proportions
-pie <- ggplot(proportions_cycling, aes(x = "", y = proportions_cycling$freq, fill = proportions_cycling$Cell_Cycle)) +
-  geom_col() +
-  geom_text(aes(label = proportions_cycling$freq), position = position_stack(vjust = 0), color = "white") +
-  coord_polar(theta = "y") +
-  theme_void() +
-  facet_grid(Condition ~ PatientID) +
-  scale_fill_manual(values = c("blue","red")) + theme(legend.position = "none")
-ggsave(pie, filename = paste(resultsdirectory, "plots/Heatmap/Piecharts_Cycling.pdf", sep = "/"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
-
-GBM_metadata <- GBM_metadata[!duplicated(GBM_metadata$Condition_PatientID),]
-GBM_metadata <- GBM_metadata[,-c(4:13)]
-
-## Heatmap of NUPR1 markers ####
-
-
-## Extract average read counts per patient_condition
-all.genes <- rownames(GBM_700cells)
-GBM_700cells <- ScaleData(GBM_700cells, features = all.genes)
-Idents(GBM_700cells) <- GBM_700cells$Condition_PatientID
-
-##Idents(GBM_700cells) <- GBM_700cells$Condition
-GBM_matrix_avg <- AverageExpression(GBM_700cells, slot = "counts")
-GBM_matrix_avg <- as.data.frame(GBM_matrix_avg[[1]])
-GBM_matrix_avg <- GBM_matrix_avg[NUPR1_markers$all_genes,]
-GBM_matrix_avg <- GBM_matrix_avg[rowSums(is.na(GBM_matrix_avg)) != ncol(GBM_matrix_avg),]
-GBM_matrix_avg <- as.data.frame(t(GBM_matrix_avg))
-GBM_matrix_avg$sample <- rownames(GBM_matrix_avg)
-GBM_matrix_avg <- GBM_matrix_avg %>% separate(sample, c("Patient","Condition"), '_')
-GBM_matrix_avg <- split(GBM_matrix_avg, GBM_matrix_avg$Patient)
-write.csv(as.data.frame(GBM_matrix_avg), file = paste0(resultsdirectory, "/Differential Expression/GBM_Average_Matrix.csv"), quote = FALSE)
-
-
-x <- lapply(GBM_matrix_avg, function(x){
-  as.data.frame(t(x))
-  x[-c(51:52),]
-})
-
-for(i in 1:length(x)){
-  x[[i]] <- x[[i]][,1]/x[[i]][,2]
-}
-
-### Run this if you want to process TME and CSF separately #####
-TME_avg <- GBM_matrix_avg[,grepl("TME", colnames(GBM_matrix_avg))]
-TME_avg$Average_TME <- rowMeans(TME_avg)
-CSF_avg <- GBM_matrix_avg[,grepl("CSF", colnames(GBM_matrix_avg))]
-CSF_avg$Average_CSF <- rowMeans(CSF_avg)
-
-Average_matrix <- GBM_matrix_avg[rowSums(is.na(GBM_matrix_avg)) != ncol(GBM_matrix_avg),]
-
-mean_per_gene <- function(x){
-  x/TME_avg$Average_TME
-}
-Average_matrix <- mean_per_gene(Average_matrix)
-Heatmap <- data.frame(log2(Average_matrix+1))
-
-Average_matrix <- list(TME_avg,CSF_avg)
-names(Average_matrix) <- c("TME","CSF")
-
-##col_names <- c("BAH1","MN1", "HW1","111","134", "159", "448", "468", "469","497")
-for(i in 1:length(Average_matrix)){
-  Average_matrix[[i]] <- Average_matrix[[i]][,sort(colnames(Average_matrix[[i]]))]
-  ##colnames(Average_matrix[[i]]) <- col_names
-  Average_matrix[[i]] <- Average_matrix[[i]][rowSums(is.na(Average_matrix[[i]])) != ncol(Average_matrix[[i]]),]
-  ##Average_matrix[[i]] <- as.matrix(t(scale(t(Average_matrix[[i]]))))
-}
-
-Heatmap <- cbind(Average_matrix[[1]], Average_matrix[[2]])
-
-#### Scale matrix ####
-Heatmap <- data.frame(t(scale(t(GBM_matrix_avg))))
-##Heatmap <- GBM_matrix_avg
-##Heatmap <- data.frame(scale(GBM_matrix_avg))
-markers <- na.omit(markers[rownames(Heatmap),])
-Heatmap <- Heatmap[rowSums(is.na(Heatmap)) != ncol(Heatmap),]
-Heatmap$description <- markers$function_1
-
-## Function to caluclate a distance matrix by excluding NA values
-dist_no_na <- function(Heatmap) {
-    edist <- dist(Heatmap[,1:20]) ## calulcate dist
-    edist[which(is.na(edist))] <- max(edist, na.rm=TRUE) * 1.1 ## get the maximum value, multiply by 1.1 and add to NA values
-    return(edist)
-}
-
-Dist <- dist_no_na(Heatmap[,1:20])
-Clust <- hclust(Dist)
-plot(Clust)
-
-library(RColorBrewer)
+13.We visualise the expression of potential NUPR1 pathway markers
+```{We visualise the expression of potential NUPR1 pathway markers}
+## Create cluster annotation
 library(ComplexHeatmap)
 library(circlize)
 library(pals)
 library(magick)
 library(dendsort)
 library(colorspace)
-library(stats)
 
-color_h <- colorRamp2(c(-1,0,1,2), c("blue","white","red","firebrick"))
+Idents(GBM_700cells) <- "Condition_PatientID"
+seurat_cluster.averages <- AverageExpression(GBM_700cells, return.seurat = FALSE)
+seurat_cluster.averages
+
+## Subset seurat object for top marker genes (top 20 per cluster)
+subset.matrix <- seurat_cluster.averages[["RNA"]][c("NUPR1","RNF2","TP53INP1","TP53","NSA2","PTMA","EP300","MSL1","NACA","SYNCRIP","NONO","FUS","COPS5","PSMD4","MPHOSPH6","TRIB3","STX18","KDM3A","UCP1","KNSTRN","MAPRE1","RAN","RANBP1","SEC11A"),]
+dim(subset.matrix)
+cor_matrix <- cor(t(subset.matrix), method = "spearman")
+## Z-score the gene expression for visualization with heatmap
+cal_z_score <- function(x){ ## function for scaling
+  (x - mean(x)) / sd(x)
+}
+subset.matrix <- t(apply(subset.matrix, 1, cal_z_score))
+
+## Create Heatmap annotations
+tbl_GBM_700cells <- GBM_700cells@meta.data %>%
+  group_by(Condition_PatientID, Quadrant) %>%
+  summarise(n = n()) %>%
+  mutate(freq = n / sum(n))
+tbl_GBM_700cells
+
+anno <- as.data.frame(tbl_GBM_700cells)
+anno <- reshape2::dcast(anno, Condition_PatientID ~ Quadrant)
+row.names(anno) <- anno$Condition_PatientID
+anno$Condition_PatientID <- NULL
+head(anno)
+anno[is.na(anno)] <- 0
+anno <- (anno / rowSums(anno)) * 100
+anno <- anno[match(colnames(subset.matrix),rownames(anno)),]
+row.names(anno) == colnames(subset.matrix) ## TRUE
+column_ha <- HeatmapAnnotation(Quadrant = anno_barplot(anno, gp = gpar(fill = c("goldenrod", ##red
+                                                                                "red",
+                                                                                "saddlebrown",
+                                                                                "royalblue1")))) ##GBM_700cells
+
+tbl_GBM_700cells_2 <- GBM_700cells@meta.data %>%
+  group_by(Condition_PatientID, Cell_Cycle) %>%
+  summarise(n = n()) %>%
+  mutate(freq = n / sum(n))
+tbl_GBM_700cells_2
+
+anno_2 <- as.data.frame(tbl_GBM_700cells_2)
+anno_2 <- reshape2::dcast(anno_2, Condition_PatientID ~ Cell_Cycle)
+row.names(anno_2) <- anno_2$Condition_PatientID
+anno_2$Condition_PatientID <- NULL
+head(anno_2)
+anno_2[is.na(anno_2)] <- 0
+anno_2 <- (anno_2 / rowSums(anno_2)) * 100
+anno_2 <- anno_2[match(colnames(subset.matrix),rownames(anno_2)),]
+row.names(anno_2) == colnames(subset.matrix) ## TRUE
+column_ha_2 <- HeatmapAnnotation(Cell_Cycle = anno_barplot(anno_2, gp = gpar(fill = c("blue","red")))) 
+
+column_ha_3 <- HeatmapAnnotation(NUPR1 = NUPR1_avg[,1:20], col = list(NUPR1 = colorRamp2(c(-1.5, 0, 2), c("white", "coral", "red"))), border = T, annotation_height = unit(1, "cm"),
+    annotation_width = unit(1, "cm"))
+
+## Create Heatmap
+Names_order <- c("SANTB00111_CSF","SANTB00134_CSF","SANTB00159_CSF","SANTB00448_CSF","SANTB00468_CSF", "SANTB00469_CSF","SANTB00497_CSF","BAH1_CSF","HW1_CSF","MN1_CSF","SANTB00111_TME", "SANTB00134_TME","SANTB00159_TME","SANTB00448_TME","SANTB00468_TME", "SANTB00469_TME","SANTB00497_TME","BAH1_TME","HW1_TME","MN1_TME")
+
+
+hm <- ComplexHeatmap::Heatmap(subset.matrix,
+                              border = TRUE,
+                              show_row_names = T,
+                              show_column_names = T,
+                              row_title = "NUPR1 pathway markers",
+                              cluster_rows = TRUE,
+                              cluster_columns = T,
+                              ##column_order = Names_order,
+                              column_title = "cluster", 
+                              width = unit(12, "cm"),
+                              height = unit(12, "cm"),
+                              column_dend_reorder = T,
+                              row_dend_reorder = T,
+                              show_row_dend = TRUE, 
+                              show_column_dend = TRUE,
+                              row_names_gp =  gpar(fontsize = 12),
+                              column_dend_height = unit(1, "cm"),
+                              row_dend_width = unit(1, "cm"),
+                              bottom_annotation = c(column_ha, column_ha_2),
+                              heatmap_legend_param = list(
+                                title = "Scaled average expression"))
+pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/GBM_700cells_NUPR1_pathway_markers_byConditionPatientID.pdf", sep = "/"), width = 12, height = 12)
+##pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/GBM_700cells_NUPR1_pathway_markers_avgexpcorrelation_spearman.pdf", sep = "/"), width = 12, height = 12)
+draw(hm)
+dev.off()
+
+Idents(GBM_700cells) <- "Condition"
+seurat_cluster.averages <- AverageExpression(GBM_700cells, return.seurat = FALSE)
+seurat_cluster.averages
+
+## Subset seurat object for NUPR1 pathway markers
+NUPR1_pathway_markers <- c("NUPR1","RNF2","TP53INP1","TP53","NSA2","PTMA","EP300","MSL1","NACA","SYNCRIP","NONO","FUS","COPS5","PSMD4","MPHOSPH6","TRIB3","STX18","KDM3A","KNSTRN","MAPRE1","RAN","RANBP1","SEC11A","UCP1") ##from string
+
+##NUPR1_pathway_markers <- c("NUPR1","MGMT","RELB","CDKN1A","SNAP25","BECN1", "RAB31", "GREB1", "CYP1B1", "NEDD9", "GRN", "DNMT1")
+
+CSF_Markers <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/All_CSF_Markers_700cells_percondition_downsample-minpct0.1.csv"))
+
+subset.matrix <- CSF_Markers[rownames(CSF_Markers) %in% NUPR1_pathway_markers, c(1:2)]
+row.names(subset.matrix) <- rownames(subset.matrix)
+dim(subset.matrix)
+
+color_h <- colorRamp2(c(-0.5,0,1.6), c("blue","white","red"))
+hm <- ComplexHeatmap::Heatmap(as.matrix(subset.matrix),
+                              border = TRUE,
+                              show_row_names = T,
+                              show_column_names = F,
+                              cluster_rows = TRUE,
+                              cluster_columns = TRUE,
+                              width = unit(1, "cm"),
+                              height = unit(12, "cm"),
+                              column_dend_reorder = T,
+                              row_dend_reorder = T,
+                              col = color_h,
+                              show_row_dend = F, 
+                              show_column_dend = F,
+                              row_names_gp =  gpar(fontsize = 12),
+                              column_dend_height = unit(1, "cm"),
+                              row_dend_width = unit(1, "cm"),
+                              cell_fun = function(j, i, x, y, width, height, fill) {
+        grid.text(sprintf("%.1f", subset.matrix[i, j]), x, y, gp = gpar(fontsize = 14))},
+             heatmap_legend_param = list(
+               title = "Average Log2 FC", at = c(-5,-2.5,0,2.5,5)))
+pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/NUPR1_pathway_markers_LOG2FC_allCSF.pdf", sep = "/"), width = 4, height = 12)
+draw(hm)
+dev.off()
+
+## Load DE_markers
+set.seed(1)
+file_names <- list.files(paste0(resultsdirectory, "/Differential Expression/"), pattern = "_minpct0.1*",full.names = F)
+DE_markers <- lapply(file_names, function(x) {
+  read.csv(paste0(resultsdirectory, "/Differential Expression/", x), header = T)}) 
+names(DE_markers) <- file_names
+rm(file_names)
+
+for(i in 1:length(DE_markers)){
+DE_markers[[i]] <- DE_markers[[i]][DE_markers[[i]]$X %in% NUPR1_pathway_markers,c(1,3)]
+row.names(DE_markers[[i]]) <- DE_markers[[i]]$X
+DE_markers[[i]]$X <- NULL
+}
+
+##Create a matrix containing the top genes from the differential expression of all cells
+Fold_change <- data.frame(matrix(ncol = 10, nrow=24))
+col_names <- c("111", "134", "159", "448", "468", "469", "497", "BAH1","HW1", "MN1")
+colnames(Fold_change) <- col_names
+rownames(Fold_change) <- NUPR1_pathway_markers
+rownames(Fold_change) <- c("NUPR1","MGMT","RELB","CDKN1A","SNAP25","BECN1", "RAB31", "GREB1", "CYP1B1", "NEDD9", "GRN", "DNMT1")
+
+##We now subset the differential expression analysis based on the top genes
+for(i in 1:ncol(Fold_change)){
+  Fold_change[match(rownames(DE_markers[[i]]),rownames(Fold_change)), i] <- cbind(DE_markers[[i]]$avg_log2FC)
+}
+Fold_change <- Fold_change[-c(6,9,24),]
+
+
 color_h <- colorRamp2(c(-1,0,2.5), c("blue","white","red"))
-##color_h <- colorRamp2(c(0,2,4,6,8), c("white","red","red","firebrick","firebrick"))
-bottom_anno <- HeatmapAnnotation(blank = anno_empty(border = FALSE))
-description <- rowAnnotation(text = anno_text(Heatmap$description, location = 0, just = "left"),
-    row_km = 3))
-
-pdf(file = paste0(resultsdirectory, "/plots/Heatmap/Heatmap_Scaled_Avg_Counts.pdf"), width = 12, height = 12, onefile = T) ##Run to save as pdf
-h <- Heatmap(as.matrix(Heatmap[,1:20]), 
-             ##as.matrix(Heatmap[,1:2]),
-             show_row_names = T,
+h <- Heatmap(as.matrix(Fold_change), show_row_names = TRUE,
              show_column_names = T, 
-             cluster_columns = T,
-             ##cluster_columns = function(m) as.dendrogram(Clust), 
+             cluster_columns = T, 
              column_dend_reorder = T,
              row_dend_reorder = T,
-             cluster_rows = function(m) as.dendrogram(Clust),
+             cluster_rows = F,
              show_row_dend = TRUE, 
              show_column_dend = TRUE,
              column_dend_height = unit(1, "cm"),
              row_dend_width = unit(2, "cm"),
              col = color_h, ##update colors in previous step
              use_raster = FALSE, 
-             top_annotation = bottom_anno,
              raster_device = "png",
-             bottom_annotation = bottom_anno,
              na_col = "grey",
-            row_names_side = "left",
              row_names_gp =  gpar(fontsize = 18),
              rect_gp = gpar(col = "white", lwd = 1),
              cell_fun = function(j, i, x, y, width, height, fill) {
-       grid.text(sprintf("%.1f", Heatmap[,1:20][i, j]), x, y, gp = gpar(fontsize = 10))},
-            heatmap_legend_param = list(
-             title = "Scaled average counts", at = c(-1,0,1,2)))
-h + Heatmap(Heatmap$description, name = "function", col = function_col)
-
+        grid.text(sprintf("%.1f", Fold_change[i, j]), x, y, gp = gpar(fontsize = 14))},
+             heatmap_legend_param = list(
+               title = "Average Log2 FC", at = c(-1,0,1,2,3)))
+pdf(file = paste0(resultsdirectory, "plots/Heatmap/Heatmap_2_Downsampled.pdf"), width = 12, height = 12, onefile = T) ##Run to save as pdf
+draw(h)
 dev.off()
 
-## Extract raw matrix and average expression matrix 
-GBM_matrix_raw <- GBM_700cells[["RNA"]]@counts
-GBM_matrix_raw <- as.matrix(GBM_matrix_raw[which(rownames(GBM_matrix_raw) %in% NUPR1_markers$all_genes),])
-GBM_matrix_raw <- GBM_matrix_raw[rowSums(GBM_matrix_raw) > 0,]
+Idents(GBM_700cells) <- "Condition_PatientID"
+seurat_cluster.averages <- AverageExpression(GBM_700cells, return.seurat = FALSE)
+seurat_cluster.averages
 
-GBM_matrix_scaled <- GBM_700cells[["RNA"]]@data
-GBM_matrix_scaled <- as.matrix(GBM_matrix_scaled[which(rownames(GBM_matrix_scaled) %in% NUPR1_markers$all_genes),])
-GBM_matrix_scaled <- GBM_matrix_scaled[rowSums(GBM_matrix_scaled) > 0,]
+top_genes <- CSF_Markers %>% top_n(n = 50, wt = avg_log2FC)
+top_genes <- top_genes$X
+
+## Subset seurat object for top marker genes (top 20 per cluster)
+subset.matrix <- seurat_cluster.averages[["RNA"]][top_genes,]
+
+dim(subset.matrix)
+cor_matrix <- cor(t(subset.matrix), method = "spearman")
+## Z-score the gene expression for visualization with heatmap
+cal_z_score <- function(x){ ## function for scaling
+  (x - mean(x)) / sd(x)
+}
+  
+subset.matrix <- t(apply(subset.matrix, 1, cal_z_score))
+subset.matrix <- subset.matrix[,-grep("TME", colnames(subset.matrix))]
+
+## Create Heatmap annotations
+tbl_GBM_700cells <- GBM_700cells@meta.data %>%
+  group_by(Condition_PatientID, Quadrant) %>%
+  summarise(n = n()) %>%
+  mutate(freq = n / sum(n))
+tbl_GBM_700cells
+
+anno <- as.data.frame(tbl_GBM_700cells)
+anno <- reshape2::dcast(anno, Condition_PatientID ~ Quadrant)
+row.names(anno) <- anno$Condition_PatientID
+anno$Condition_PatientID <- NULL
+head(anno)
+anno[is.na(anno)] <- 0
+anno <- (anno / rowSums(anno)) * 100
+anno <- anno[match(colnames(subset.matrix),rownames(anno)),]
+row.names(anno) == colnames(subset.matrix) ## TRUE
+column_ha <- HeatmapAnnotation(Quadrant = anno_barplot(anno, gp = gpar(fill = c("goldenrod", ##red
+                                                                                "red",
+                                                                                "saddlebrown",
+                                                                                "royalblue1")))) ##GBM_700cells
+
+tbl_GBM_700cells_2 <- GBM_700cells@meta.data %>%
+  group_by(Condition_PatientID, Cell_Cycle) %>%
+  summarise(n = n()) %>%
+  mutate(freq = n / sum(n))
+tbl_GBM_700cells_2
+
+anno_2 <- as.data.frame(tbl_GBM_700cells_2)
+anno_2 <- reshape2::dcast(anno_2, Condition_PatientID ~ Cell_Cycle)
+row.names(anno_2) <- anno_2$Condition_PatientID
+anno_2$Condition_PatientID <- NULL
+head(anno_2)
+anno_2[is.na(anno_2)] <- 0
+anno_2 <- (anno_2 / rowSums(anno_2)) * 100
+anno_2 <- anno_2[match(colnames(subset.matrix),rownames(anno_2)),]
+row.names(anno_2) == colnames(subset.matrix) ## TRUE
+column_ha_2 <- HeatmapAnnotation(Cell_Cycle = anno_barplot(anno_2, gp = gpar(fill = c("blue","red")))) 
+
+
+
+color_h <- colorRamp2(c(-1,-0.5,0,0.5,1), c("blue","deepskyblue","white","coral","firebrick"))
+hm <- ComplexHeatmap::Heatmap(subset.matrix,
+                              border = TRUE,
+                              show_row_names = T,
+                              show_column_names = T,
+                              cluster_rows = TRUE,
+                              cluster_columns = TRUE,
+                              width = unit(12, "cm"),
+                              height = unit(12, "cm"),
+                              column_dend_reorder = T,
+                              row_dend_reorder = T,
+                              ##bottom_annotation = column_ha_2,
+                              ##col = color_h,
+                              show_row_dend = T, 
+                              show_column_dend = T,
+                              row_names_gp =  gpar(fontsize = 12),
+                              column_dend_height = unit(1, "cm"),
+                              row_dend_width = unit(1, "cm"),cell_fun = function(j, i, x, y, width, height, fill) {
+        grid.text(sprintf("%.1f", subset.matrix[i, j]), x, y, gp = gpar(fontsize = 0))},
+             heatmap_legend_param = list(
+               title = "Scaled average expression"), at = c(-5,-2.5,0,2.5,5))
+pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/NUPR1_top50genes_CSF_scaledavgexpression.pdf", sep = "/"), width = 12, height = 12)
+draw(hm)
+dev.off()
+
+proportions_seurat_clusters <- GBM_700cells@meta.data %>%
+  group_by(Condition_PatientID, Quadrant) %>%
+  summarise(n = n()) %>%
+  mutate(freq = (n/sum(n))*100)
+
+proportions_seurat_clusters$freq <- round(proportions_seurat_clusters$freq,2)
+proportions_seurat_clusters$Quadrant <- factor(proportions_seurat_clusters$Quadrant, levels = c("AClike","MESlike","NPClike","OPClike"))
+
+pie <- ggplot(proportions_seurat_clusters, aes(x ="", y = proportions_seurat_clusters$freq, fill = proportions_seurat_clusters$Quadrant)) +
+  geom_col() +
+  ##geom_text(aes(label = proportions_seurat_clusters$freq), position = position_stack(vjust = 1)) +
+  coord_polar(theta = "y") +
+  theme_void() +
+  facet_grid(~Condition_PatientID) +
+  scale_fill_manual(values = c("AClike" = "goldenrod1", "MESlike" = "red","NPClike" = "saddlebrown","OPClike" = "royalblue")) + theme(legend.position = "none") 
+pie
+ggsave(pie, filename = paste(resultsdirectory, "/plots/Pie charts/GBM_700cells__Cellstate_proportions_per_Condition_PatientID_NoLegend.pdf", sep = "/"), height = 6, width = 20, dpi = 300, useDingbats = FALSE)
+
+```
+
+
+```{GO and GSEA - GBM_700cells}
+## Load CSF markers
+CSF_Markers <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/All_CSF_Markers_700cells_percondition_downsample-minpct0.1.csv"), row.names = "X")
+CSF_Markers <- CSF_Markers[order(-CSF_Markers$avg_log2FC, CSF_Markers$p_val_adj),]
+
+# add a column for UP and DOWN regulated genes.
+CSF_Markers$diffexpressed <- "NO"
+# if log2Foldchange > 0.6 and pvalue < 0.05, set as "UP" 
+CSF_Markers$diffexpressed[CSF_Markers$avg_log2FC > 0.5 & CSF_Markers$score > 100] <- "UP"
+# if log2Foldchange < -0.6 and pvalue < 0.05, set as "DOWN"
+CSF_Markers$diffexpressed[CSF_Markers$avg_log2FC < -0.5 & CSF_Markers$score > 100] <-  "DOWN"
+
+# add a column of NAs
+CSF_Markers$delabel <- NA
+CSF_Markers$delabel[CSF_Markers$diffexpressed != "NO"] <- rownames(CSF_Markers)[CSF_Markers$diffexpressed != "NO"]
+
+CSF_Markers$p_val_adj[which(CSF_Markers$p_val_adj == 0)] <- 1e-304
+CSF_Markers$score <- (-log10(CSF_Markers$p_val_adj))*sign(CSF_Markers$avg_log2FC)
+CSF_Markers <- CSF_Markers[order(-CSF_Markers$score),]
+CSF_Markers$rank <- 1:nrow(CSF_Markers)
+
+### Use this if you want to run fgsea analysis ####
+library(fgsea)
+Hallmark <- msigdbr(species = "Homo sapiens", category = "H")
+Hallmark <- Hallmark %>% 
+  dplyr::select(gs_name, gene_symbol, entrez_gene)
+Hallmark <-  split(as.character(Hallmark$entrez_gene), Hallmark$gs_name)
+
+Phenotype <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "HPO")
+Phenotype <- Phenotype %>% 
+  dplyr::select(gs_name, gene_symbol,entrez_gene, ensembl_gene)
+Phenotype <-  split(as.character(Phenotype$gene_symbol), Phenotype$gs_name)
+
+Oncogenic <- msigdbr(species = "Homo sapiens", category = "C6")
+Oncogenic <- Oncogenic %>% 
+  dplyr::select(gs_name, gene_symbol,entrez_gene, ensembl_gene)
+Oncogenic <-  split(as.character(Oncogenic$gene_symbol), Oncogenic$gs_name)
+
+Ontology <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "BP")
+Ontology <- Ontology %>% 
+  dplyr::select(gs_name, gene_symbol, entrez_gene, ensembl_gene)
+Ontology <-  split(as.character(Ontology$gene_symbol), Ontology$gs_name)
+
+fgsea_Ont <- fgsea(Ontology, geneList)
+fgsea_Ont <- fgsea_Ont[fgsea_Ont$padj <= 0.05 & fgsea_Ont$size >= 10,]
+
+
+##### Run Gene Ontology Analyses ####
+library(data.table)
+library(msigdbr)
+library(clusterProfiler)
+library(enrichplot)
+library(org.Hs.eg.db)
+
+#### For ClusterProfiler Analysis ####
+## For GO and GO over-representation analysis we select the top DE genes based on Log2FC > 0.5 or top 100 markers
+##gene_ids <- rownames(CSF_Markers)[CSF_Markers$avg_log2FC >= 0.5 | CSF_Markers$avg_log2FC <= -0.5]
+
+top20 <- CSF_Markers %>% top_n(n = 20, wt = avg_log2FC)
+bottom20 <- CSF_Markers %>% top_n(n =-20, wt = avg_log2FC)
+gene_ids <- c(rownames(top20),rownames(bottom20))
+
+all_genes <- as.matrix(GBM_700cells[["RNA"]]@counts)
+all_genes <- row.names(all_genes)
+
+enrichGO <- enrichGO(gene = gene_ids,
+           universe = all_genes,
+                OrgDb = "org.Hs.eg.db",
+                ont           = "BP",
+                keyType = "SYMBOL",
+                pvalueCutoff  = 0.05,
+                qvalueCutoff  = 0.01,
+                readable      = TRUE)
+save(enrichGO, file = paste(resultsdirectory, "/GSEA/GOenrichment_ORA_percluster_GBM_700cells_top20_updownregulated_BP_Ontology.RData", sep = "")) ## saved 310123
+write.csv(enrichGO@result, file = paste(resultsdirectory, "/GSEA/sheets/GOenrichment_ORA_percluster_GBM_700cells_top20_updownregulated_BP_Ontology.csv", sep = "")) ## saved 310123
+
+library(simplifyEnrichment)
+enrichGO_results <- enrichGO@result[enrichGO@result$p.adjust <= 0.05,]
+enrichGO_results <- enrichGO_results[!duplicated(enrichGO_results$geneID),] ## remove any duplicated geneIDs
+go_id <- enrichGO_results$ID
+go_mat <- GO_similarity(go_id, ont = "BP", measure = "Wang")
+
+
+## See how many clusters can be generated 
+clt <- cmp_make_clusters(go_mat)
+go_cluster <- simplifyGO(go_mat, method = "kmeans") ##8 clusters
+go_cluster_louvain <- simplifyGO(go_mat, method = "louvain") ## 8 clusters
+
+enrichGO_results$Cluster_kmeans <- go_cluster$cluster[match(enrichGO_results$ID, go_cluster$id)]
+enrichGO_results$Cluster_kmeans <- go_cluster$cluster[match(enrichGO_results$ID, go_cluster$id)]
+
+enrichGO_results$Cluster_louvain <- go_cluster_louvain$cluster[match(enrichGO_results$ID, go_cluster_louvain$id)]
+enrichGO_results$Cluster_louvain <- go_cluster_louvain$cluster[match(enrichGO_results$ID, go_cluster_louvain$id)]
+
+## Create similarity matrix
+## Louvain clustering was used for CSF paper - kmeans clustering provided variable clustering each time
+ha_louvain = HeatmapAnnotation(clusters = go_cluster_louvain$cluster, 
+                       col = list(clusters = c("1" = "coral",
+  "2" = "#5BE885",
+  "3" = "purple",
+  "4" = "goldenrod1",
+  "5" = "red",
+  "6" = "darksalmon",
+  "7" = "darkorange",
+  "8" = "royalblue1"
+  )))
+
+ha_kmeans = HeatmapAnnotation(clusters = go_cluster$cluster, 
+                       col = list(clusters = c("1" = "coral",
+  "2" = "#5BE885",
+  "3" = "purple",
+  "4" = "goldenrod1",
+  "5" = "red",
+  "6" = "darksalmon",
+  "7" = "darkorange",
+  "8" = "royalblue1"
+  )))
+
+word_cloud_louvain <- rowAnnotation(GO_term = anno_word_cloud_from_GO(go_cluster_louvain$cluster, go_cluster_louvain$id))
+word_cloud_kmeans <- rowAnnotation(GO_term = anno_word_cloud_from_GO(go_cluster$cluster, go_cluster$id))
+
+pdf(file = paste(resultsdirectory,"plots/GO and GSEA/GO_similarity_matrix_louvain_clustering.pdf", sep = "/"), width = 12, height = 12)
+hm <- Heatmap(go_mat,
+        col = c("white","red","firebrick"),
+        row_split = go_cluster_louvain$cluster,
+        column_split = go_cluster_louvain$cluster,
+        show_row_names = F,
+        show_column_names = F,
+        show_row_dend = T,
+        show_column_dend = T,
+        cluster_row_slices = F,
+        cluster_column_slices = F,
+        cluster_rows = F,
+        cluster_columns = F,
+        top_annotation = ha_louvain,
+        row_title = "cluster",
+        column_title = "cluster", 
+        width = unit(15, "cm"),
+        height = unit(15, "cm"),
+        right_annotation = word_cloud_louvain,
+       row_names_gp =  gpar(fontsize = 12),
+       ##column_dend_height = unit(1, "cm"),
+       ##row_dend_width = unit(1, "cm"),
+       heatmap_legend_param = list(title = "Similarity"))
+draw(hm)
+dev.off()
+
+#####
+enrichGO_results$new_description <- ifelse(enrichGO_results$Cluster_louvain == "1", "cell migration", ifelse(enrichGO_results$Cluster_louvain == "2", "response to extracellular signals", ifelse(enrichGO_results$Cluster_louvain == "3", "metabolic processes", 
+ifelse(enrichGO_results$Cluster_louvain == "4", "growth and development", 
+ifelse(enrichGO_results$Cluster_louvain == "5", "regulation of apoptotic processes", 
+ifelse(enrichGO_results$Cluster_louvain == "6", "endoplasmic reticulum stress response",
+ifelse(enrichGO_results$Cluster_louvain == "7", "negative growth regulation","cell division")))))))
+
+library(GOplot)
+enrichGO_results <- enrichGO_results[order(enrichGO_results$p.adjust),]
+enrichGO_list <- list()
+enrichGO_list$results <- data.frame("Category" = "BP", "ID" = enrichGO_results$Cluster_louvain, "Term" = enrichGO_results$new_description, "Genes" = enrichGO_results$geneID, "adj_pval" = enrichGO_results$p.adjust)
+enrichGO_list$results$Genes <- gsub("/",",",enrichGO_list$results$Genes)
+
+## Make genes list
+geneList <- rbind(top20, bottom20)
+enrichGO_list$geneList <- data.frame("ID" = rownames(geneList), "logFC" = geneList$avg_log2FC)
+
+enrichGO_list$process <- unique(circ$term)
+
+circ <- circle_dat(enrichGO_list$results, enrichGO_list$geneList)
+GOCircle(circ, nsub = 8, rad1 = 2, rad2 = 3)
+chord <- chord_dat(circ, enrichGO_list$geneList, enrichGO_list$process)
+
+# Display only genes which are assigned to at least three processes
+pdf(file = paste0(resultsdirectory,"/plots/GO and GSEA/GOChord_top20rankedgenes_louvainclustering_legend.pdf"), width = 6, height = 6)
+GOChord(chord, nlfc = 1, limit = c(0,0), 
+        space = 0.02, 
+        gene.space = 0.25, 
+        gene.order = "logFC", 
+        border.size = 0, 
+        ribbon.col = c("darkorange","goldenrod1","royalblue1","#5BE885","red","darksalmon","purple","coral"),
+        gene.size = 3, 
+        process.label = 5,
+        lfc.min = -1.79,
+        lfc.max = 1.57,
+        lfc.col = c("red","white","blue")) ##+ NoLegend()
+dev.off()
+
+save(enrichGO, enrichGO_results, go_mat, go_cluster, go_cluster_louvain, word_cloud_kmeans, word_cloud_louvain, file = paste(resultsdirectory, "GSEA/GOenrichment_ORA_GO_Clustering.RData", sep = "")) 
+
+## Disease Ontology
+hs <- org.Hs.eg.db
+entrez_genes <- select(hs, 
+       keys = gene_ids,
+       columns = c("ENTREZID", "SYMBOL"),
+       keytype = "SYMBOL")
+all_genes_entrez <- select(hs, 
+       keys = all_genes,
+       columns = c("ENTREZID", "SYMBOL"),
+       keytype = "SYMBOL")
+all_genes_entrez <- all_genes_entrez[!is.na(all_genes_entrez$ENTREZID),]
+
+enrichDO <- enrichDO(gene = entrez_genes$ENTREZID,
+           universe = all_genes_entrez$ENTREZID,
+                ont           = "DO",
+                pvalueCutoff  = 0.05,
+                qvalueCutoff  = 0.01,
+                readable      = TRUE)
+save(enrichGO, file = paste(resultsdirectory, "/GSEA/DOenrichment_ORA_percluster_GBM_700cells_top20_updownregulated.RData", sep = "")) ## saved 010223
+write.csv(enrichGO@result, file = paste(resultsdirectory, "/GSEA/sheets/DOenrichment_ORA_percluster_GBM_700cells_top20_updownregulated.csv", sep = "")) ## saved 010223
+
+library(simplifyEnrichment)
+enrichDO_results <- enrichDO@result[enrichDO@result$p.adjust <= 0.05,]
+enrichDO_results <- enrichDO_results[!duplicated(enrichDO_results$geneID),] ## remove any duplicated geneIDs
+do_id <- enrichDO_results$ID
+do_mat <- DO_similarity(do_id, measure = "Wang")
+
+
+## See how many clusters can be generated 
+clt <- cmp_make_clusters(do_mat)
+do_cluster <- simplifyEnrichment(do_mat, method = "kmeans", plot = F) ##8 clusters
+do_cluster_louvain <- simplifyEnrichment(do_mat, method = "louvain", plot = F) ## 8 clusters
+
+enrichDO_results$Cluster_kmeans <- do_cluster$cluster[match(enrichDO_results$ID, do_cluster$id)]
+enrichDO_results$Cluster_kmeans <- do_cluster$cluster[match(enrichDO_results$ID, do_cluster$id)]
+
+enrichDO_results$Cluster_louvain <- do_cluster_louvain$cluster[match(enrichDO_results$ID, do_cluster_louvain$id)]
+enrichDO_results$Cluster_louvain <- do_cluster_louvain$cluster[match(enrichDO_results$ID, do_cluster_louvain$id)]
+
+## Create similarity matrix
+ha_louvain = HeatmapAnnotation(clusters = do_cluster_louvain$cluster, 
+                       col = list(clusters = c("1" = "coral",
+  "2" = "#5BE885",
+  "3" = "purple",
+  "4" = "goldenrod1",
+  "5" = "red"
+  )))
+
+ha_kmeans = HeatmapAnnotation(clusters = do_cluster$cluster, 
+                       col = list(clusters = c("1" = "coral",
+  "2" = "#5BE885",
+  "3" = "purple",
+  "4" = "goldenrod1",
+  "5" = "red",
+  "6" = "darksalmon",
+  "7" = "darkorange",
+  "8" = "royalblue1",
+  "9" = "aquamarine",
+  "10" = "grey89"
+  )))
+
+word_cloud_louvain <- rowAnnotation(DO_term = anno_word_cloud(enrichDO_results$Cluster_louvain, enrichDO_results$Description))
+word_cloud_kmeans <- rowAnnotation(DO_term = anno_word_cloud(enrichDO_results$Cluster_kmeans, enrichDO_results$Description))
+
+pdf(file = paste(resultsdirectory,"plots/GO and GSEA/DO_similarity_matrix_kmeans_clustering.pdf", sep = "/"), width = 12, height = 12)
+hm <- Heatmap(do_mat,
+        col = c("white","red","firebrick"),
+        row_split = do_cluster$cluster,
+        column_split = do_cluster$cluster,
+        show_row_names = F,
+        show_column_names = F,
+        show_row_dend = F,
+        show_column_dend = F,
+        cluster_row_slices = F,
+        cluster_column_slices = F,
+        cluster_rows = F,
+        cluster_columns = F,
+        top_annotation = ha_kmeans,
+        row_title = "cluster",
+        column_title = "cluster", 
+        width = unit(15, "cm"),
+        height = unit(15, "cm"),
+        right_annotation = word_cloud_kmeans,
+       row_names_gp =  gpar(fontsize = 12),
+       ##column_dend_height = unit(1, "cm"),
+       ##row_dend_width = unit(1, "cm"),
+       heatmap_legend_param = list(title = "Similarity"))
+draw(hm)
+dev.off()
+```
+
+```{Assessing expression of NUPR1 pathway markers}
+geneList <- CSF_Markers$avg_log2FC
+names(geneList) <- rownames(CSF_Markers)
+
+## Investigate whether MGMT, and other NUPR1 targets are up/downregulated in CSF
+Idents(GBM_700cells) <- "Condition_PatientID"
+seurat_cluster.averages <- AverageExpression(GBM_700cells, return.seurat = FALSE)
+seurat_cluster.averages
+
+## Subset seurat object for top marker genes (top 20 per cluster)
+subset.matrix <- seurat_cluster.averages[["RNA"]][c("NUPR1","RNF2","TP53INP1","TP53","NSA2","PTMA","EP300","MSL1","NACA","SYNCRIP","NONO","FUS","COPS5","PSMD4","MPHOSPH6","TRIB3","STX18","KDM3A","UCP1","KNSTRN","MAPRE1","RAN","RANBP1","SEC11A","MGMT","RELB","CDKN1A","HMOX1","SNAP25", "BECN1", "RAB31", "GREB1", "CYP1B1", "NEDD9", "GRN", "DNMT1"),]
+
+write.csv(subset.matrix, file = paste0(resultsdirectory, "/GBM_All_sheets/MGMT_and_NUPR1_marker_average_expression_GBM_700cells.csv"))
+
+subset.matrix <- seurat_cluster.averages[["RNA"]][c("NUPR1","MGMT","RELB","CDKN1A","SNAP25","BECN1", "RAB31", "GREB1", "CYP1B1", "NEDD9", "GRN", "DNMT1"),]
+write.csv(subset.matrix, file = paste0(resultsdirectory, "/GBM_All_sheets/NUPR1_transcriptional_targets_average_expression_GBM_700cells.csv"))
+
+library(stringr)
+subset.matrix <- as.data.frame(t(subset.matrix))
+subset.matrix[c("PatientID", "Condition")] <- str_split_fixed(rownames(subset.matrix), '_', 2)
+subset.matrix <- split(subset.matrix, subset.matrix$PatientID)
+
+subset.matrix_FC <- lapply(subset.matrix, function(x){
+  x[,13:14] <- NULL
+  x[grep("CSF",rownames(x)),]/x[grep("TME",rownames(x)),]
+})
+subset.matrix <- do.call("rbind", subset.matrix_FC)
+subset.matrix[,1:12][is.infinite(subset.matrix[,1:12])]
+
+hm <- ComplexHeatmap::Heatmap(as.matrix(subset.matrix),
+                              border = TRUE,
+                              show_row_names = T,
+                              show_column_names = T,
+                              cluster_rows = F,
+                              cluster_columns = F,
+                              width = unit(12, "cm"),
+                              height = unit(12, "cm"),
+                              column_dend_reorder = T,
+                              na_col = "grey",
+                              row_dend_reorder = F,
+                              show_row_dend = F, 
+                              show_column_dend = F,
+                              row_names_gp =  gpar(fontsize = 12),
+                              column_dend_height = unit(1, "cm"),
+                              row_dend_width = unit(1, "cm"),cell_fun = function(j, i, x, y, width, height, fill) {
+        grid.text(sprintf("%.1f", subset.matrix[i, j]), x, y, gp = gpar(fontsize = 0))},
+             heatmap_legend_param = list(
+               title = "Fold change (CSF/GM)"))
+pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/XX.pdf", sep = "/"), width = 12, height = 12)
+draw(hm)
+dev.off()
 ```
 
