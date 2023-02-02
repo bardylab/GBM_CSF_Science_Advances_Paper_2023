@@ -2038,6 +2038,7 @@ enrichGO_results$Cluster_louvain <- go_cluster_louvain$cluster[match(enrichGO_re
 enrichGO_results$Cluster_louvain <- go_cluster_louvain$cluster[match(enrichGO_results$ID, go_cluster_louvain$id)]
 
 ## Create similarity matrix
+## Louvain clustering was used for CSF paper - kmeans clustering provided variable clustering each time
 ha_louvain = HeatmapAnnotation(clusters = go_cluster_louvain$cluster, 
                        col = list(clusters = c("1" = "coral",
   "2" = "#5BE885",
