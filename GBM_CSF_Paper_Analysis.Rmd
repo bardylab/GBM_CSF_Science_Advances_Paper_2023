@@ -2028,9 +2028,12 @@ go_mat <- GO_similarity(go_id, ont = "BP", measure = "Wang")
 
 ## See how many clusters can be generated 
 clt <- cmp_make_clusters(go_mat)
-go_cluster <- simplifyGO(go_mat, method = "kmeans") ##8 clusters
+
+## generate clusters using either k-means clustering or louvain clustering. 
+go_cluster <- simplifyGO(go_mat, method = "kmeans") ##8 clusters generated - but this may change each time you run. 
 go_cluster_louvain <- simplifyGO(go_mat, method = "louvain") ## 8 clusters
 
+## Add cluster numbers to enrichGO results. 
 enrichGO_results$Cluster_kmeans <- go_cluster$cluster[match(enrichGO_results$ID, go_cluster$id)]
 enrichGO_results$Cluster_kmeans <- go_cluster$cluster[match(enrichGO_results$ID, go_cluster$id)]
 
@@ -2061,6 +2064,8 @@ ha_kmeans = HeatmapAnnotation(clusters = go_cluster$cluster,
   "8" = "royalblue1"
   )))
 
+## generate word cloud annotations
+## NOTE: word cloud annotations do not show up properly in the plots pane. Save as pdf to view heatmap properly. 
 word_cloud_louvain <- rowAnnotation(GO_term = anno_word_cloud_from_GO(go_cluster_louvain$cluster, go_cluster_louvain$id))
 word_cloud_kmeans <- rowAnnotation(GO_term = anno_word_cloud_from_GO(go_cluster$cluster, go_cluster$id))
 
@@ -2091,12 +2096,14 @@ draw(hm)
 dev.off()
 
 #####
+## Assign new definitions to clusters.
 enrichGO_results$new_description <- ifelse(enrichGO_results$Cluster_louvain == "1", "cell migration", ifelse(enrichGO_results$Cluster_louvain == "2", "response to extracellular signals", ifelse(enrichGO_results$Cluster_louvain == "3", "metabolic processes", 
 ifelse(enrichGO_results$Cluster_louvain == "4", "growth and development", 
 ifelse(enrichGO_results$Cluster_louvain == "5", "regulation of apoptotic processes", 
 ifelse(enrichGO_results$Cluster_louvain == "6", "endoplasmic reticulum stress response",
 ifelse(enrichGO_results$Cluster_louvain == "7", "negative growth regulation","cell division")))))))
 
+## We now create a chord plot with new cluster definitions.  
 library(GOplot)
 enrichGO_results <- enrichGO_results[order(enrichGO_results$p.adjust),]
 enrichGO_list <- list()
@@ -2106,7 +2113,6 @@ enrichGO_list$results$Genes <- gsub("/",",",enrichGO_list$results$Genes)
 ## Make genes list
 geneList <- rbind(top20, bottom20)
 enrichGO_list$geneList <- data.frame("ID" = rownames(geneList), "logFC" = geneList$avg_log2FC)
-
 enrichGO_list$process <- unique(circ$term)
 
 circ <- circle_dat(enrichGO_list$results, enrichGO_list$geneList)
