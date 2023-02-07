@@ -1172,28 +1172,26 @@ CSF_Markers$rank <- 1:nrow(CSF_Markers)
 
 ### Use this if you want to run fgsea analysis ####
 library(fgsea)
+library(data.table)
+library(msigdbr)
+library(org.Hs.eg.db)
+
 Hallmark <- msigdbr(species = "Homo sapiens", category = "H")
 Hallmark <- Hallmark %>% 
   dplyr::select(gs_name, gene_symbol, entrez_gene)
 Hallmark <-  split(as.character(Hallmark$entrez_gene), Hallmark$gs_name)
 
-Phenotype <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "HPO")
+Phenotype <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "HPO") ##BP for biological process, MF Molecular Function, CC Cellular Componenet, HPO Human Phenotype Ontology. 
+
 Phenotype <- Phenotype %>% 
   dplyr::select(gs_name, gene_symbol,entrez_gene, ensembl_gene)
 Phenotype <-  split(as.character(Phenotype$gene_symbol), Phenotype$gs_name)
 
-Oncogenic <- msigdbr(species = "Homo sapiens", category = "C6")
-Oncogenic <- Oncogenic %>% 
-  dplyr::select(gs_name, gene_symbol,entrez_gene, ensembl_gene)
-Oncogenic <-  split(as.character(Oncogenic$gene_symbol), Oncogenic$gs_name)
+geneList <- c(top20$avg_log2FC, bottom20$avg_log2FC)
+names(geneList) <- c(rownames(top20),rownames(bottom20))
 
-Ontology <- msigdbr(species = "Homo sapiens", category = "C5", subcategory = "BP")
-Ontology <- Ontology %>% 
-  dplyr::select(gs_name, gene_symbol, entrez_gene, ensembl_gene)
-Ontology <-  split(as.character(Ontology$gene_symbol), Ontology$gs_name)
-
-fgsea_Ont <- fgsea(Ontology, geneList)
-fgsea_Ont <- fgsea_Ont[fgsea_Ont$padj <= 0.05 & fgsea_Ont$size >= 10,]
+fgsea <- fgsea(Phenotype, geneList)
+fgsea <- fgsea[fgsea$padj <= 0.05 & fgsea$size >= 10,]
 
 
 ##### Run Gene Ontology Analyses ####
@@ -1303,7 +1301,7 @@ dev.off()
 #####
 ## Assign new definitions to clusters.
 enrichGO_results$new_description <- ifelse(enrichGO_results$Cluster_louvain == "1", "cell migration", ifelse(enrichGO_results$Cluster_louvain == "2", "response to extracellular signals", ifelse(enrichGO_results$Cluster_louvain == "3", "metabolic processes", 
-ifelse(enrichGO_results$Cluster_louvain == "4", "growth and development", 
+ifelse(enrichGO_results$Cluster_louvain == "4", "development", 
 ifelse(enrichGO_results$Cluster_louvain == "5", "regulation of apoptotic processes", 
 ifelse(enrichGO_results$Cluster_louvain == "6", "endoplasmic reticulum stress response",
 ifelse(enrichGO_results$Cluster_louvain == "7", "negative growth regulation","cell division")))))))
@@ -1318,11 +1316,12 @@ enrichGO_list$results$Genes <- gsub("/",",",enrichGO_list$results$Genes)
 ## Make genes list
 geneList <- rbind(top20, bottom20)
 enrichGO_list$geneList <- data.frame("ID" = rownames(geneList), "logFC" = geneList$avg_log2FC)
-enrichGO_list$process <- unique(circ$term)
-
 circ <- circle_dat(enrichGO_list$results, enrichGO_list$geneList)
+enrichGO_list$process <- unique(circ$term)
 GOCircle(circ, nsub = 8, rad1 = 2, rad2 = 3)
 chord <- chord_dat(circ, enrichGO_list$geneList, enrichGO_list$process)
+
+write.csv(circ, file = paste(resultsdirectory, "/GSEA/sheets/ChordPlot_GOenrichment_ORA_percluster_GBM_700cells_top20_updownregulated_BP_Ontology.csv", sep = ""))
 
 # Display only genes which are assigned to at least three processes
 pdf(file = paste0(resultsdirectory,"/plots/GO and GSEA/GOChord_top20rankedgenes_louvainclustering_legend.pdf"), width = 6, height = 6)
@@ -1478,6 +1477,7 @@ column_ha <- HeatmapAnnotation(Survival = anno_barplot(All_Treatment[3,], beside
 
 ## Create Heatmap annotations
 color_h <- colorRamp2(c(0,1,2.5,7.5,10,15), c("blue","white","orange","coral","red","firebrick"))
+
 hm <- ComplexHeatmap::Heatmap(subset.matrix_FC,
                               border = TRUE,
                               show_row_names = T,
@@ -1503,6 +1503,37 @@ hm <- ComplexHeatmap::Heatmap(subset.matrix_FC,
                title = "Fold change (CSF/GM)",at = c(0,2.5,7.5,10,12.5,15)))
 ## c(-2, 0, 2, 4)
 pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/Fold_change_NUPR1_regulated_genes.pdf", sep = "/"), width = 12, height = 12)
+draw(hm)
+dev.off()
+
+enrichGO_results <- enrichGO_results[order(enrichGO_results$Cluster_louvain),]
+top20 <- top20[order(-top20$avg_log2FC),]
+bottom20 <- bottom20[order(-bottom20$avg_log2FC),]
+gene_ids <- c(rownames(top20), rownames(bottom20))
+gene_ids <- gene_ids[(gene_ids %in% unique(circ$genes))]
+
+color_h <- colorRamp2(c(0,1), c("grey95","grey35"))
+hm <- ComplexHeatmap::Heatmap(chord[,1:8],
+                              border = TRUE,
+                              show_row_names = T,
+                              show_column_names = T,
+                              column_order = unique(enrichGO_results$new_description),
+                              row_order = gene_ids,
+                              cluster_rows = F,
+                              cluster_columns = F,
+                              width = unit(12, "cm"),
+                              height = unit(12, "cm"),
+                              column_dend_reorder = F,
+                              col = color_h,
+                              na_col = "grey",
+                              rect_gp = gpar(col = "white", lwd = 1),
+                              row_dend_reorder = F,
+                              show_row_dend = T, 
+                              show_column_dend = T,
+                              row_names_gp =  gpar(fontsize = 12),
+                              column_dend_height = unit(1, "cm"),
+                              row_dend_width = unit(1, "cm"))
+pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/GOterms_top20genes_heatmap.pdf", sep = "/"), width = 12, height = 12)
 draw(hm)
 dev.off()
 
