@@ -1323,6 +1323,8 @@ chord <- chord_dat(circ, enrichGO_list$geneList, enrichGO_list$process)
 
 write.csv(circ, file = paste(resultsdirectory, "/GSEA/sheets/ChordPlot_GOenrichment_ORA_percluster_GBM_700cells_top20_updownregulated_BP_Ontology.csv", sep = ""))
 
+write.csv(enrichGO_results, file = paste(resultsdirectory, "/GSEA/sheets/GOenrichment_ORA_top20_updownregulated_BP_Ontology_wnewcluster_description.csv", sep = "")) ## saved 310123
+
 # Display only genes which are assigned to at least three processes
 pdf(file = paste0(resultsdirectory,"/plots/GO and GSEA/GOChord_top20rankedgenes_louvainclustering_legend.pdf"), width = 6, height = 6)
 GOChord(chord, nlfc = 1, limit = c(0,0), 
@@ -1340,7 +1342,7 @@ dev.off()
 
 save(enrichGO, enrichGO_results, go_mat, go_cluster, go_cluster_louvain, word_cloud_kmeans, word_cloud_louvain, file = paste(resultsdirectory, "GSEA/GOenrichment_ORA_GO_Clustering.RData", sep = "")) 
 
-## Disease Ontology
+## convert symbols to entrez ids
 hs <- org.Hs.eg.db
 entrez_genes <- select(hs, 
        keys = gene_ids,
@@ -1352,83 +1354,23 @@ all_genes_entrez <- select(hs,
        keytype = "SYMBOL")
 all_genes_entrez <- all_genes_entrez[!is.na(all_genes_entrez$ENTREZID),]
 
-enrichDO <- enrichDO(gene = entrez_genes$ENTREZID,
-           universe = all_genes_entrez$ENTREZID,
-                ont           = "DO",
-                pvalueCutoff  = 0.05,
-                qvalueCutoff  = 0.01,
-                readable      = TRUE)
-save(enrichGO, file = paste(resultsdirectory, "/GSEA/DOenrichment_ORA_percluster_GBM_700cells_top20_updownregulated.RData", sep = "")) ## saved 010223
-write.csv(enrichGO@result, file = paste(resultsdirectory, "/GSEA/sheets/DOenrichment_ORA_percluster_GBM_700cells_top20_updownregulated.csv", sep = "")) ## saved 010223
+library(data.table)
+library(dplyr)
+library(formattable)
+library(tidyr)
 
-library(simplifyEnrichment)
-enrichDO_results <- enrichDO@result[enrichDO@result$p.adjust <= 0.05,]
-enrichDO_results <- enrichDO_results[!duplicated(enrichDO_results$geneID),] ## remove any duplicated geneIDs
-do_id <- enrichDO_results$ID
-do_mat <- DO_similarity(do_id, measure = "Wang")
+GO_terms_cluster <- read.csv(file = paste0(resultsdirectory,"/GBM_All_sheets/GO_terms_percluster.csv"))
 
+GO_terms_cluster <- enrichGO_results %>% summarise(new_description, ID)
+GO_terms_cluster <- reshape2::dcast(GO_terms_cluster, new_description ~ ID)
+names(GO_terms_cluster)[2:83] <- 1:82
+rownames(GO_terms_cluster) <- GO_terms_cluster$new_description
+GO_terms_cluster$new_description <- NULL
+GO_terms_cluster[is.na(GO_terms_cluster)] <- ''
 
-## See how many clusters can be generated 
-clt <- cmp_make_clusters(do_mat)
-do_cluster <- simplifyEnrichment(do_mat, method = "kmeans", plot = F) ##8 clusters
-do_cluster_louvain <- simplifyEnrichment(do_mat, method = "louvain", plot = F) ## 8 clusters
-
-enrichDO_results$Cluster_kmeans <- do_cluster$cluster[match(enrichDO_results$ID, do_cluster$id)]
-enrichDO_results$Cluster_kmeans <- do_cluster$cluster[match(enrichDO_results$ID, do_cluster$id)]
-
-enrichDO_results$Cluster_louvain <- do_cluster_louvain$cluster[match(enrichDO_results$ID, do_cluster_louvain$id)]
-enrichDO_results$Cluster_louvain <- do_cluster_louvain$cluster[match(enrichDO_results$ID, do_cluster_louvain$id)]
-
-## Create similarity matrix
-ha_louvain = HeatmapAnnotation(clusters = do_cluster_louvain$cluster, 
-                       col = list(clusters = c("1" = "coral",
-  "2" = "#5BE885",
-  "3" = "purple",
-  "4" = "goldenrod1",
-  "5" = "red"
-  )))
-
-ha_kmeans = HeatmapAnnotation(clusters = do_cluster$cluster, 
-                       col = list(clusters = c("1" = "coral",
-  "2" = "#5BE885",
-  "3" = "purple",
-  "4" = "goldenrod1",
-  "5" = "red",
-  "6" = "darksalmon",
-  "7" = "darkorange",
-  "8" = "royalblue1",
-  "9" = "aquamarine",
-  "10" = "grey89"
-  )))
-
-word_cloud_louvain <- rowAnnotation(DO_term = anno_word_cloud(enrichDO_results$Cluster_louvain, enrichDO_results$Description))
-word_cloud_kmeans <- rowAnnotation(DO_term = anno_word_cloud(enrichDO_results$Cluster_kmeans, enrichDO_results$Description))
-
-pdf(file = paste(resultsdirectory,"plots/GO and GSEA/DO_similarity_matrix_kmeans_clustering.pdf", sep = "/"), width = 12, height = 12)
-hm <- Heatmap(do_mat,
-        col = c("white","red","firebrick"),
-        row_split = do_cluster$cluster,
-        column_split = do_cluster$cluster,
-        show_row_names = F,
-        show_column_names = F,
-        show_row_dend = F,
-        show_column_dend = F,
-        cluster_row_slices = F,
-        cluster_column_slices = F,
-        cluster_rows = F,
-        cluster_columns = F,
-        top_annotation = ha_kmeans,
-        row_title = "cluster",
-        column_title = "cluster", 
-        width = unit(15, "cm"),
-        height = unit(15, "cm"),
-        right_annotation = word_cloud_kmeans,
-       row_names_gp =  gpar(fontsize = 12),
-       ##column_dend_height = unit(1, "cm"),
-       ##row_dend_width = unit(1, "cm"),
-       heatmap_legend_param = list(title = "Similarity"))
-draw(hm)
-dev.off()
+paste0(GO_terms_cluster[,1:82], sep = ",")
+  
+formattable(GO_terms_cluster, align = c("l",rep("r", NCOL(GO_terms_cluster) - 1)))
 ```
 
 14.We visualise the expression of potential NUPR1 pathway markers
