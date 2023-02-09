@@ -283,7 +283,7 @@ lapply(file_names, load, .GlobalEnv)
 ## Load combined datasets
 set.seed(1)
 file_names <- list.files(cell_line_directory, pattern = "GBM_*",full.names = T)
-lapply(file_names[3], load, .GlobalEnv) ##Make sure you load the FILTERED GBM_ALL data - they are both named 'Bardy_10x' in R
+lapply(file_names[2], load, .GlobalEnv) ##Make sure you load the FILTERED GBM_ALL data - they are both named 'Bardy_10x' in R
 rm(file_names)
 ```
 
@@ -1193,7 +1193,6 @@ names(geneList) <- c(rownames(top20),rownames(bottom20))
 fgsea <- fgsea(Phenotype, geneList)
 fgsea <- fgsea[fgsea$padj <= 0.05 & fgsea$size >= 10,]
 
-
 ##### Run Gene Ontology Analyses ####
 library(data.table)
 library(msigdbr)
@@ -1353,24 +1352,6 @@ all_genes_entrez <- select(hs,
        columns = c("ENTREZID", "SYMBOL"),
        keytype = "SYMBOL")
 all_genes_entrez <- all_genes_entrez[!is.na(all_genes_entrez$ENTREZID),]
-
-library(data.table)
-library(dplyr)
-library(formattable)
-library(tidyr)
-
-GO_terms_cluster <- read.csv(file = paste0(resultsdirectory,"/GBM_All_sheets/GO_terms_percluster.csv"))
-
-GO_terms_cluster <- enrichGO_results %>% summarise(new_description, ID)
-GO_terms_cluster <- reshape2::dcast(GO_terms_cluster, new_description ~ ID)
-names(GO_terms_cluster)[2:83] <- 1:82
-rownames(GO_terms_cluster) <- GO_terms_cluster$new_description
-GO_terms_cluster$new_description <- NULL
-GO_terms_cluster[is.na(GO_terms_cluster)] <- ''
-
-paste0(GO_terms_cluster[,1:82], sep = ",")
-  
-formattable(GO_terms_cluster, align = c("l",rep("r", NCOL(GO_terms_cluster) - 1)))
 ```
 
 14.We visualise the expression of potential NUPR1 pathway markers
@@ -1448,6 +1429,7 @@ pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/Fold_ch
 draw(hm)
 dev.off()
 
+## We create a separate heatmap to visualise chord plot results 
 enrichGO_results <- enrichGO_results[order(enrichGO_results$Cluster_louvain),]
 top20 <- top20[order(-top20$avg_log2FC),]
 bottom20 <- bottom20[order(-bottom20$avg_log2FC),]
@@ -1479,6 +1461,11 @@ pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/GOterms
 draw(hm)
 dev.off()
 
+## Visualise the expression of TFP targets
+subset.matrix <- seurat_cluster.averages[["RNA"]][c("NUPR1","DRD1","DRD2","DRD4","CALM1", "CALM2","CALM3","ADRA1A","CALY","S100A4","TNNC1","NR3C1","ADRB2","TSHR","THRB","CAMK1","CAMK1D","CAMK1G","CAMK2A","CAMK4","CAMKK1","CAMKK2","TRIB1","TRIB2","TRIB3"),] ## this is the list that will be used by Brett
+write.csv(subset.matrix, file = paste0(resultsdirectory, "/GBM_All_sheets/TFP_targets_average_expression_GBM_700cells.csv"))
+
+## Draw pie charts for the proportions of MES, AC, NPC and OPC-like cells.
 proportions_seurat_clusters <- GBM_700cells@meta.data %>%
   group_by(Condition_PatientID, Quadrant) %>%
   summarise(n = n()) %>%
