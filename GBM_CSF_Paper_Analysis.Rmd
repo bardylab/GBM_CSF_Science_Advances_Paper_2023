@@ -1371,9 +1371,10 @@ seurat_cluster.averages
 
 ## Subset seurat object for NUPR1 regulated
 ##subset.matrix <- seurat_cluster.averages[["RNA"]][c("NUPR1","RELB","CDKN1A","SNAP25","BECN1", "RAB31", "GREB1", "CYP1B1", "NEDD9", "GRN", "DNMT1"),]
+##subset.matrix <- seurat_cluster.averages[["RNA"]][c("NUPR1","RELB","CDKN1A","GRN", "DNMT1", "MGST1", "TP53","NES"),]## this is the list that will be used by Brett
 
-subset.matrix <- seurat_cluster.averages[["RNA"]][c("NUPR1","RELB","CDKN1A","GRN", "DNMT1", "MGST1", "TP53","NES"),] ## this is the list that will be used by Brett
-write.csv(subset.matrix, file = paste0(resultsdirectory, "/GBM_All_sheets/NUPR1_transcriptional_targets_average_expression_GBM_700cells.csv"))
+subset.matrix <- seurat_cluster.averages[["RNA"]][c("NUPR1","RELB","DNMT1"),] ## Currently what Brett has for qPCR
+##write.csv(subset.matrix, file = paste0(resultsdirectory, "/GBM_All_sheets/NUPR1_transcriptional_targets_average_expression_GBM_700cells.csv"))
 
 ## Calculate fold change
 library(stringr)
@@ -1383,23 +1384,37 @@ subset.matrix <- split(subset.matrix, subset.matrix$PatientID)
 
 ## Fold change of average NUPR1 gene expression
 subset.matrix_FC <- lapply(subset.matrix, function(x){
-  x[,9:10] <- NULL
+  x[,4:5] <- NULL
   x[grep("CSF",rownames(x)),]/x[grep("TME",rownames(x)),]
 })
 subset.matrix_FC <- do.call("rbind", subset.matrix_FC)
 subset.matrix_FC <- as.matrix(t(round(subset.matrix_FC,2)))
 colnames(subset.matrix_FC) <- c("BAH1","HW1","MN1","111","134","159","448","468","469","497")
+log2_subset.matrix_FC <- log2(subset.matrix_FC)
 
-All_Treatment <- read.csv(file = paste0(datadirectory, "/reference_sheets/TME_CSF_Treatment.csv"), row.names = "X")
-All_Treatment <- All_Treatment[c("111","134","159","448","468","469","497","BAH1","HW1","MN1"),6:10]
-All_Treatment[is.na(All_Treatment)] <- 0
+## Visualise the expression of TFP targets
+TFP_targets <- read.csv(file = paste0(datadirectory, "/reference_sheets/TFP_targets.csv"))
+subset.matrix <- seurat_cluster.averages[["RNA"]][rownames(seurat_cluster.averages[["RNA"]]) %in% TFP_targets$Genes == "TRUE",]
 
-All_Treatment <- t(All_Treatment[match(colnames(subset.matrix_FC), rownames(All_Treatment)),])
 
-column_ha <- HeatmapAnnotation(Survival = anno_barplot(All_Treatment[3,], beside = TRUE, attach = TRUE)) ## TFP survival
+library(stringr)
+subset.matrix <- as.data.frame(t(subset.matrix))
+subset.matrix[c("PatientID", "Condition")] <- str_split_fixed(rownames(subset.matrix), '_', 2)
+write.csv(subset.matrix, file = paste0(resultsdirectory, "/GBM_All_sheets/TFP_targets_average_expression_GBM_700cells.csv"))
+
+subset.matrix <- split(subset.matrix, subset.matrix$PatientID)
+subset.matrix_FC <- lapply(subset.matrix, function(x){
+  x[,82:83] <- NULL
+  x[grep("CSF",rownames(x)),]/x[grep("TME",rownames(x)),]
+})
+subset.matrix_FC <- do.call("rbind", subset.matrix_FC)
+subset.matrix_FC <- as.matrix(t(round(subset.matrix_FC,2)))
+colnames(subset.matrix_FC) <- c("BAH1","HW1","MN1","111","134","159","448","468","469","497")
+subset.matrix_FC[is.nan(subset.matrix_FC)] <- 0
+subset.matrix_FC[!is.finite(subset.matrix_FC)] <- 0
 
 ## Create Heatmap annotations
-color_h <- colorRamp2(c(0,1,2.5,7.5,10,15), c("blue","white","orange","coral","red","firebrick"))
+color_h <- colorRamp2(c(0,1,1.1,2.5,5,7.5), c("white","lightblue","gold2","orange","coral","red"))
 
 hm <- ComplexHeatmap::Heatmap(subset.matrix_FC,
                               border = TRUE,
@@ -1410,22 +1425,21 @@ hm <- ComplexHeatmap::Heatmap(subset.matrix_FC,
                               width = unit(12, "cm"),
                               height = unit(12, "cm"),
                               column_dend_reorder = T,
-                              bottom_annotation = column_ha,
                               col = color_h,
                               na_col = "grey",
                               row_dend_reorder = T,
                               show_row_dend = T, 
                               show_column_dend = T,
-                              row_names_gp =  gpar(fontsize = 12),
+                              row_names_gp =  gpar(fontsize =8),
                               column_dend_height = unit(1, "cm"),
                               row_dend_width = unit(1, "cm"),
                               cell_fun = function(j, i, x, y, width, height, fill) {
                                 grid.text(sprintf("%.1f", subset.matrix_FC[i,j]), 
-                                          x, y, gp = gpar(fontsize = 15))},
+                                          x, y, gp = gpar(fontsize = 8))},
                               heatmap_legend_param = list(
-               title = "Fold change (CSF/GM)",at = c(0,2.5,7.5,10,12.5,15)))
+               title = "Fold change of average expression"))
 ## c(-2, 0, 2, 4)
-pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/Fold_change_NUPR1_regulated_genes.pdf", sep = "/"), width = 12, height = 12)
+pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/LogFC_NUPR1_target_genes_DNMT1_RELB.pdf", sep = "/"), width = 12, height = 12)
 draw(hm)
 dev.off()
 
@@ -1460,10 +1474,6 @@ hm <- ComplexHeatmap::Heatmap(chord[,1:8],
 pdf(file = paste(resultsdirectory,"plots/Differential expression/Heatmap/GOterms_top20genes_heatmap.pdf", sep = "/"), width = 12, height = 12)
 draw(hm)
 dev.off()
-
-## Visualise the expression of TFP targets
-subset.matrix <- seurat_cluster.averages[["RNA"]][c("NUPR1","DRD1","DRD2","DRD4","CALM1", "CALM2","CALM3","ADRA1A","CALY","S100A4","TNNC1","NR3C1","ADRB2","TSHR","THRB","CAMK1","CAMK1D","CAMK1G","CAMK2A","CAMK4","CAMKK1","CAMKK2","TRIB1","TRIB2","TRIB3"),] ## this is the list that will be used by Brett
-write.csv(subset.matrix, file = paste0(resultsdirectory, "/GBM_All_sheets/TFP_targets_average_expression_GBM_700cells.csv"))
 
 ## Draw pie charts for the proportions of MES, AC, NPC and OPC-like cells.
 proportions_seurat_clusters <- GBM_700cells@meta.data %>%
