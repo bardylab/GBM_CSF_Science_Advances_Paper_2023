@@ -1,4 +1,4 @@
 .DS_Store
-data/**
+data/Cellranger_outs/**
 results/**
 .Rproj.user
