@@ -1,4 +1,5 @@
 .DS_Store
 data/Cellranger_outs/**
+data/RData/Individual Cell Line RData/**
 results/**
 .Rproj.user
