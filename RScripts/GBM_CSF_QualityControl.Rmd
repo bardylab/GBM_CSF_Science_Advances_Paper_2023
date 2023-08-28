@@ -4,7 +4,7 @@ author: "Inushi De Silva"
 date: '2022-07-13'
 output: html_document
 ---
-```{r setup, include=FALSE}
+```{ setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 options("yaml.eval.expr" = TRUE)
 ```
@@ -13,7 +13,7 @@ options("yaml.eval.expr" = TRUE)
 
 1.  ***First we will load the required libraries and set workingdirectories, datadirectories and plotdirectories.***
 
-```{r Load Libraries and Set Directory Paths}
+```{Load Libraries and Set Directory Paths}
 ## Specify directories
 script_path <- rstudioapi::getActiveDocumentContext()$path
 script_dir <- dirname(script_path)
@@ -52,7 +52,7 @@ if(!require(ggpointdensity)){
 
 2a. ***Next, read in the 10X feature matrices. This will be the path to a folder containing three .tgz files.***
 
-```{r Load and Read 10x Data + Create Seurat Object}
+```{Load and Read 10x Data + Create Seurat Object}
 ##We set the path to the .tgz files
 ##Replace the name of the cell line each time
 SANTB00111_TME_data <- paste0(datadirectory, "/Cellranger_outs/111_TME_feature_matrix/")
@@ -78,12 +78,12 @@ Seurat_111$Condition_PatientID <- paste(Seurat_111$PatientID, Seurat_111$Conditi
 Seurat_111 <- merge(Seurat_111_CSF, y = Seurat_111_TME)
 
 ##Save Seurat object Pre-filter.
-save(Seurat_111, file =  paste0(resultsdirectory, "/SANTB00111/RData/Prefilter_SANTB00111.RData/"))
+save(Seurat_111, file =  paste0(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/RData/Prefilter_SANTB00111.RData/"))
 ```
 
 2b. ***We visualise the spread of the data, number of cells, number of genes and number of reads per cell here. We calculate percentages of mitochondrial reads for each cell and also calculate the number of housekeeping genes expressed by each cell. This will help us filter out any dead cells or empty droplets. Run this and replace name of Seurat Object each time you want to visualise a different cell iine***
 
-```{r Data Visualisation and QC}
+```{Data Visualisation and QC}
 ########## PRE-PROCESSING DATA QUALITY CONTROL & FILTERING #################
 ##NOTE: In each seurat object, the nCountRNA = Number of UMIs per cell and nFeature_RNA = number of genes detected per cell
 ## Let’s quickly do some plotting to look at the number of reads per cell and detected/expressed genes per cell (often called complexity)
@@ -97,7 +97,7 @@ hist <- ggplot(Seurat_111@meta.data, aes(Seurat_111@meta.data$nCount_RNA)) + the
   scale_y_continuous(breaks = seq(0, 1000, by = 250)) +
   coord_cartesian(xlim = c(0, 75000), ylim = c(0, 1000)) + geom_vline(xintercept = 55000, linetype = "dashed", col = "red", size = 1)
 hist
-ggsave(hist, file = paste(resultsdirectory, "SANTB00111/plots/Seurat_111_reads_per_cell_beforefiltering.pdf", sep = "/"), width = 10, height = 6)
+ggsave(hist, file = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/plots/Seurat_111_reads_per_cell_beforefiltering.pdf", sep = "/"), width = 10, height = 6)
 
 
 ## Plot a frequency distribution (histogram) of the number of detected genes
@@ -109,12 +109,12 @@ hist2 <- ggplot(Seurat_111@meta.data, aes(Seurat_111@meta.data$nFeature_RNA)) + 
   scale_y_continuous(breaks = seq(0, 750, by = 250)) +
   coord_cartesian(xlim = c(0, 9000), ylim = c(0, 750)) + geom_vline(xintercept = 2000, linetype = "dashed", col = "red", size = 1)
 hist2
-ggsave(hist2, file = paste(resultsdirectory, "SANTB00111/plots/Seurat_111_genes_per_cell_beforefiltering.pdf", sep = "/"), width = 10, height = 6)
+ggsave(hist2, file = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/plots/Seurat_111_genes_per_cell_beforefiltering.pdf", sep = "/"), width = 10, height = 6)
 ```
 
 3.  ***Following Visualisation we add new metadata for mitochondrial reads and housekeeping genes***
 
-```{r Add Metadata - Mitochondrial reads, Housekeeping Genes}
+```{Add Metadata - Mitochondrial reads, Housekeeping Genes}
 ## Filter and Create New Seurat Object  #####
 SANTB00111 <- CreateSeuratObject(counts = Seurat_111@assays$RNA@counts, meta.data = Seurat_111@meta.data, min.cells = 3, min.features = 200) ## include only genes that are are expressed in 3 or more cells and cells with complexity of 200 genes or more
 SANTB00111@assays[["RNA"]]@counts[1:10,1:10] # look at the first 10 genes (rows) and first 10 cells (columns)
@@ -139,7 +139,7 @@ SANTB00111 <- AddMetaData(object = SANTB00111, metadata = n.expressed.hkgenes, c
 
 4.  ***Visualisation of Mitochondrial Reads and Housekeeping Genes - For each cell line, run this by replacing name of Seurat Object each time***
 
-```{r Visualisation of Mitochondrial Reads and Housekeeping Genes}
+```{Visualisation of Mitochondrial Reads and Housekeeping Genes}
 ## Visualize these QC metrics
 VlnPlot(object = SANTB00111, features = c("nFeature_RNA", "nCount_RNA", "percent.mt","n.exp.hkgenes"), ncol = 4,  pt.size = 0)
 ggsave(file = paste(resultsdirectory, "SANTB00111/plots/SANTB00111_seurat_QC_metrics_beforefiltering.pdf", sep = "/"), width = 10, height = 6)
@@ -159,7 +159,7 @@ scatterPlot <- ggplot(SANTB00111@meta.data, aes(x = nCount_RNA, y = nFeature_RNA
   geom_hline(yintercept = 2000, linetype = "dashed", col = "red", size = 1) + 
   geom_vline(xintercept = 55000, linetype = "dashed", col = "red", size = 1)
 scatterPlot
-ggsave(scatterPlot, filename = paste(resultsdirectory, "SANTB00111/plots/PreQC_SANTB00111_UMIcounts_versus_genesdetected_per_cell_legend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+ggsave(scatterPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/plots/PreQC_SANTB00111_UMIcounts_versus_genesdetected_per_cell_legend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 
 ##Next we visualise the number of genes dected against the percentage of mitochondrial reads prior to filtering the SANTB00111 data.
 scatterPlot <- ggplot(SANTB00111@meta.data, aes(x = nFeature_RNA, y = percent.mt)) +
@@ -175,7 +175,7 @@ scatterPlot <- ggplot(SANTB00111@meta.data, aes(x = nFeature_RNA, y = percent.mt
   geom_hline(yintercept = 20, linetype = "dashed", col = "red", size = 1) + 
   geom_vline(xintercept = 2000, linetype = "dashed", col = "red", size = 1)
 scatterPlot
-ggsave(scatterPlot, filename = paste(resultsdirectory, "SANTB00111/plots/PreQC_SANTB00111_genesdetected_versus_percentmtreads_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+ggsave(scatterPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/plots/PreQC_SANTB00111_genesdetected_versus_percentmtreads_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 
 ##Do the same with nCountRNA.
 scatterPlot <- ggplot(SANTB00111@meta.data, aes(x = nCount_RNA, y = percent.mt)) +
@@ -191,7 +191,7 @@ scatterPlot <- ggplot(SANTB00111@meta.data, aes(x = nCount_RNA, y = percent.mt))
   geom_hline(yintercept = 20, linetype = "dashed", col = "red", size = 1) + 
   geom_vline(xintercept = 55000, linetype = "dashed", col = "red", size = 1)
 scatterPlot
-ggsave(scatterPlot, filename = paste(resultsdirectory, "SANTB00111/plots/PreQC_SANTB00111_umicounts_versus_percentmtreads_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+ggsave(scatterPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/plots/PreQC_SANTB00111_umicounts_versus_percentmtreads_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 
 ## Plot of # of HKG genes expressed VS # of genes detected. 
 scatterPlot <- ggplot(SANTB00111@meta.data, aes(x = nFeature_RNA, y = n.exp.hkgenes)) +
@@ -207,7 +207,7 @@ scatterPlot <- ggplot(SANTB00111@meta.data, aes(x = nFeature_RNA, y = n.exp.hkge
   geom_hline(yintercept = 70, linetype = "dashed", col = "red", size = 1) + 
   geom_vline(xintercept = 2000, linetype = "dashed", col = "red", size = 1)
 scatterPlot
-ggsave(scatterPlot, filename = paste(resultsdirectory, "SANTB00111/plots/PreQC_SANTB00111_genesdetected_versus_nexpHKgenes_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+ggsave(scatterPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/plots/PreQC_SANTB00111_genesdetected_versus_nexpHKgenes_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 
 ##Do the same with nCountRNA.
 scatterPlot <- ggplot(SANTB00111@meta.data, aes(x = nCount_RNA, y = n.exp.hkgenes)) +
@@ -223,12 +223,12 @@ scatterPlot <- ggplot(SANTB00111@meta.data, aes(x = nCount_RNA, y = n.exp.hkgene
   geom_hline(yintercept = 70, linetype = "dashed", col = "red", size = 1) + 
   geom_vline(xintercept = 55000, linetype = "dashed", col = "red", size = 1)
 scatterPlot
-ggsave(scatterPlot, filename = paste(resultsdirectory, "SANTB00111/plots/PreQC_SANTB00111_umicounts_versus_nexpHKgenes_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+ggsave(scatterPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/plots/PreQC_SANTB00111_umicounts_versus_nexpHKgenes_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 ```
 
 5.  ***Now we filter out any dead cells and cells with low numbers of HK genes***
 
-```{r QC of Bardy Seurat Object}
+```{QC of Bardy Seurat Object}
 ## Filter the cells based on the quality control metrics: filtering based on (1) # of detected genes, (2) percent mitochondrial reads, (3) no. of housekeeping genes expressed
 SANTB00111_QC <- subset(x = SANTB00111, subset = nFeature_RNA >= 2000 & percent.mt < 20 & n.exp.hkgenes >= 70 & nCount_RNA < 55000)
 ## We will remove cells with < 2000 genes detected, with 20% or more mitochondrial reads, and with less than 70 hKG expressed
@@ -247,7 +247,7 @@ scale_x_continuous(breaks = seq(0, 9000, by = 1000)) +
  coord_cartesian(xlim = c(0, 9000), ylim = c(0, 1000)) +
  geom_vline(xintercept = 2000, linetype = "dashed", col = "red", size = 1)
 histoPlot
-ggsave(histoPlot, filename = paste(resultsdirectory, "SANTB00111/plots/SANTB00111_histogram_genes_per_cell_preQC.pdf", sep = "/"), height = 6, width = 10, dpi = 300, useDingbats = FALSE)
+ggsave(histoPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/plots/SANTB00111_histogram_genes_per_cell_preQC.pdf", sep = "/"), height = 6, width = 10, dpi = 300, useDingbats = FALSE)
 
 ##We subset the QC'd seurat object by CSF and TME and save. We will use these objects to create a merged dataset. 
 SANTB00111_CSF <- subset(x = SANTB00111_QC, subset = Condition == "CSF")
@@ -256,13 +256,13 @@ save(SANTB00111_CSF, file = paste(datadirectory, "/RData/Individual Cell Line RD
 save(SANTB00111_TME, file = paste(datadirectory,"/RData/Individual Cell Line RData/SANTB00111_TME.Rdata"))
 
 ##Save Seurat objects QC and following filtering.
-save(SANTB00111, file = paste(resultsdirectory,"/SANTB00111/RData/SANTB00111_PreQC.Rdata"))
-save(SANTB00111_QC, file = paste(resultsdirectory,"/SANTB00111/RData/SANTB00111_QC.Rdata"))
+save(SANTB00111, file = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/RData/SANTB00111_PreQC.Rdata"))
+save(SANTB00111_QC, file = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00111/RData/SANTB00111_QC.Rdata"))
 ```
 
 6.  ***Data visualisation of cells Pre-QC***
 
-```{SUPPLEMENTARY FIGURE 10B and C}
+```{SUPPLEMENTARY FIGURE 5B and C}
 ## We first load all the pre-filtered Seurat Objects for each cell line.
 ## We then merge them into a Seurat Object - Bardy_10X. 
 Bardy_10x <- merge(Seurat_111, y = c(Seurat_134, Seurat_159, Seurat_448, Seurat_468, Seurat_469, Seurat_497, Seurat_BAH1, Seurat_BAH1B, Seurat_HW1, Seurat_MN1))
