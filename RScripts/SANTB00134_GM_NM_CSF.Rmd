@@ -1,0 +1,559 @@
+---
+title: "[SANTB00134 w/NME] Create Seurat Objects - Pre-processing and QC of Single-Cell RNAseq Data"
+author: "Inushi De Silva"
+date: "18/01/2022"
+output: html_document
+---
+1. ***First we will load the required libraries and set workingdirectories, datadirectories and plot directories***
+```{Load Libraries and Set Directory Paths}
+## Specify directories
+script_path <- rstudioapi::getActiveDocumentContext()$path
+script_dir <- dirname(script_path)
+setwd(script_dir)
+workingdirectory <- dirname(script_dir)
+datadirectory <- paste0(workingdirectory, "/data")
+resultsdirectory <- paste0(workingdirectory, "/results")
+cell_line_directory <- paste0(datadirectory,"/RData")
+##dir.create(resultsdirectory)
+
+## Load libraries
+if(!require(dplyr)){
+  install.packages("dplyr")
+  library(dplyr)
+}
+if(!require(Seurat)){
+  install.packages("Seurat")
+  library(Seurat)
+}
+if(!require(ggplot2)){
+  install.packages("ggplot2")
+  library(ggplot2)
+}
+if(!require(sctransform)){
+  install.packages("sctransform")
+  library(sctransform)
+}
+if(!require(RColorBrewer)){
+  install.packages("RColorBrewer")
+  library(RColorBrewer)
+}
+if(!require(ggpointdensity)){
+  install.packages("ggpointdensity")
+  library(ggpointdensity)
+}
+```
+
+2. ***Next, read in the 10X feature matrices. This will be the path to a folder containing three .tgz files***
+```{Load and Read 10x Data + Create Seurat Object}
+SANTB00134_CSF_data <-  paste0(datadirectory, "/Cellranger_outs/134_CSF_feature_matrix/")
+SANTB00134_TME_data <-  paste0(datadirectory, "/Cellranger_outs/134_TME_feature_matrix/")
+SANTB00134_NME_data <-  paste0(datadirectory, "/Cellranger_outs/134_NME_feature_matrix/")
+
+SANTB00134_CSF <- Read10X(SANTB00134_CSF_data)
+SANTB00134_TME <- Read10X(SANTB00134_TME_data)
+SANTB00134_NME <- Read10X(SANTB00134_NME_data)
+
+Seurat_134_CSF <- CreateSeuratObject(counts = SANTB00134_CSF, project = "134_CSF")
+Seurat_134_TME <- CreateSeuratObject(counts = SANTB00134_TME, project = "134_TME")
+Seurat_134_NME <- CreateSeuratObject(counts = SANTB00134_NME, project = "134_NME")
+
+Seurat_134_CSF$PatientID <- "SANTB00134"
+Seurat_134_CSF$Condition <- "CSF"
+Seurat_134_TME$PatientID <- "SANTB00134"
+Seurat_134_TME$Condition <- "TME"
+Seurat_134_NME$PatientID <- "SANTB00134"
+Seurat_134_NME$Condition <- "NME"
+
+##If running on Mac, merging all Seurat objects may give the error - vector limit reached - to overcome this error make sure that you remove unnecessary Global Env and you may also go to Terminal, touch .Renv, open .Renv add R_MAX_VSIZE=100Gb and save. 
+Seurat_134 <- merge(Seurat_134_CSF, y = c(Seurat_134_TME, Seurat_134_NME))
+Seurat_134$Condition_PatientID <- paste(Seurat_134$PatientID, Seurat_134$Condition, sep = "_")
+
+##save(Seurat_134, file =  paste0(datadirectory, "/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/RData_NME/Prefilter_withNME.Rdata"))
+```
+
+2b.***We  visualise the spread of the data, number of cells, number of genes and number of reads per cell here. We calculate percentages of mitochondrial reads for each cell and also calculate the number of housekeeping genes expressed by each cell. This will help us filter out any dead cells or empty droplets. Run this and replace name of Seurat Object each time you want to visualise a different cell iine***
+```{Data Visualisation}
+##NOTE: In each seurat object, the nCountRNA = Number of UMIs per cell and nFeature_RNA = number of genes detected per cell
+## Plot a frequency distribution (histogram) of the number of reads
+hist <- ggplot(Seurat_134@meta.data, aes(Seurat_134@meta.data$nCount_RNA)) + theme_light() +
+  geom_histogram(bins = 50, color = "black", fill = "grey") +
+  theme(legend.position = "none", axis.text.x = element_text(size = 16, angle = 90, hjust = 1, vjust = 0.5), axis.text.y = element_text(size = 16), axis.title.x = element_text(size = 16), axis.title.y = element_text(size = 16), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab("Number of Reads") + ylab("Number of Cells") +
+  scale_x_continuous(breaks = seq(0, 100000, by = 20000)) +
+  scale_y_continuous(breaks = seq(0, 1000, by = 100)) +
+  coord_cartesian(xlim = c(0, 100000), ylim = c(0,1000)) + geom_vline(xintercept = 55000, linetype = "dashed", col = "red", size = 1)
+hist
+ggsave(hist, file = paste(datadirectory, "/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/plots NME/Seurat_134_reads_per_cell_beforefiltering.pdf", sep = "/"), width = 10, height = 6)
+##hist(counts_per_cell, xlab = "Number of reads", ylab = "Number of cells", breaks = 75, col = "darkgrey", main = "") + abline(v = 2000, col = "red")
+
+## Plot a frequency distribution (histogram) of the number of detected genes
+hist2 <- ggplot(Seurat_134@meta.data, aes(Seurat_134@meta.data$nFeature_RNA)) + theme_light() + 
+  geom_histogram(bins = 50, color = "black", fill = "grey") +
+  theme(legend.position = "none", axis.text.x = element_text(size = 16, angle = 90, hjust = 1, vjust = 0.5), axis.text.y = element_text(size = 16), axis.title.x = element_text(size = 16), axis.title.y = element_text(size = 16), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab("Number of Genes Expressed") + ylab("Number of Cells") +
+  scale_x_continuous(breaks = seq(0, 10000, by = 1000)) +
+  scale_y_continuous(breaks = seq(0, 500, by = 100)) +
+  coord_cartesian(xlim = c(0, 10000), ylim = c(0, 500)) + geom_vline(xintercept = 2000, linetype = "dashed", col = "red", size = 1)
+hist2
+ggsave(hist2, file = paste(datadirectory, "/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/plots NME/Seurat_134_genes_per_cell_beforefiltering.pdf", sep = "/"), width = 10, height = 6)
+```
+
+3. ***Following Visualisation we add new metadata for mitochondrial reads and housekeeping genes***
+```{Add Metadata - Mitochondrial reads, Housekeeping Genes}
+## 134 - Pre Merge - Create Seurat object #####
+SANTB00134_NME <- CreateSeuratObject(counts = Seurat_134@assays$RNA@counts, meta.data = Seurat_134@meta.data, min.cells = 3, min.features = 200) ## include only genes that are are expressed in 3 or more cells and cells with complexity of 200 genes or more
+SANTB00134_NME@assays[["RNA"]]@counts[1:10,1:10] # look at the first 10 genes (rows) and first 10 cells (columns)
+dim(SANTB00134_NME) ## 23805 genes and 8772 cells
+dim(Seurat_134) ##36601 genes and 8831 cells
+
+## Compute the proportion of reads that are of mitochondrial origin for every cell (percent.mito)
+SANTB00134_NME <- PercentageFeatureSet(object = SANTB00134_NME, pattern = "^MT-", col.name = "percent.mt") ## store mitochondrial perentage in object meta data
+head(SANTB00134_NME[["percent.mt"]])
+head(SANTB00134_NME@meta.data, 6) ## show QC metrics for the first 6 cells
+
+## Compute the number of house keeping genes expressed in each cell -- HKGs are abundant and are usually steadliy expressed in cells, thus less sensitive to the high dropout
+## housekeepers.txt: list of 98 housekeeping genes compiled in Tirosh et al., 2016, to be used in data preprocessing, to remove sources of unwanted variation -- downloaded from https://github.com/Michorlab/tnbc_scrnaseq/blob/master/data/housekeepers.txt
+hkgenes <- read.table(paste0(datadirectory, "/reference_sheets/housekeepers.txt")) ## load the the list of house keeping genes
+hkgenes <- as.vector(hkgenes$V1)
+hkgenes.found <- which(toupper(rownames(SANTB00134_NME@assays[["RNA"]]@counts)) %in% hkgenes) ## remove hkgenes that were not found
+length(hkgenes.found) ## 93/98 HKGs found
+n.expressed.hkgenes <- Matrix::colSums(SANTB00134_NME@assays[["RNA"]]@counts[hkgenes.found, ] > 0) # sum the number of detected house keeping genes for each cell, then add this to the meta data
+SANTB00134_NME <- AddMetaData(object = SANTB00134_NME, metadata = n.expressed.hkgenes, col.name = "n.exp.hkgenes")
+save(SANTB00134_NME, file = paste0(datadirectory,"/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/RData_NME/SANTB00134_NME_PreQC_new.Rdata"))
+```
+
+4. ***Visualisation of Mitochondrial Reads and Housekeeping Genes - For each cell line, run this by replacing name of Seurat Object each time***
+```{Visualisation of Mitochondrial Reads and Housekeeping Genes}
+## Visualize these QC metrics
+VlnPlot(object = SANTB00134_NME, features = c("nFeature_RNA", "nCount_RNA", "percent.mt","n.exp.hkgenes"), ncol = 4,  pt.size = 0)
+ggsave(file = paste(plotsdirectory, "SANTB00134_seurat_QC_metrics_beforefiltering.pdf", sep = "/"), width = 10, height = 6)
+
+##First we visualise the nCount_RNA against nFeature_RNA prior to filtering the SANTB00134_NME data. 
+##Run the same line following filtering in Step 8. 
+scatterPlot <- ggplot(SANTB00134_NME@meta.data, aes(x = nCount_RNA, y = nFeature_RNA)) +
+  theme_light() +
+  geom_point(size = 2) +
+  geom_pointdensity(adjust = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(8)) + ## colors in the scale
+  theme(legend.position = "none", axis.text.x = element_text(size = 22, angle = 90, hjust = 1, vjust = 0.5), axis.text.y = element_text(size = 22), axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab("Number of UMI Counts") + ylab("Number of genes detected") +
+  scale_x_continuous(breaks = seq(0, 100000, by = 25000)) +
+  scale_y_continuous(breaks = seq(0, 10000, by = 2000)) +
+  coord_cartesian(xlim = c(0, 100000), ylim = c(0, 10000)) +
+  geom_hline(yintercept = 2000, linetype = "dashed", col = "red", size = 1) + 
+  geom_vline(xintercept = 55000, linetype = "dashed", col = "red", size = 1)
+scatterPlot
+ggsave(scatterPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefiler_and_combined_RData/SANTB00134/plots NME/PreQC_SANTB00134_NME_UMIcounts_versus_genesdetected_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+##Next we visualise the number of genes dected against the percentage of mitochondrial reads prior to filtering the SANTB00134_NME data.
+scatterPlot <- ggplot(SANTB00134_NME@meta.data, aes(x = nFeature_RNA, y = percent.mt)) +
+  theme_light() +
+  geom_point(size = 2) +
+  geom_pointdensity(adjust = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(8)) + ## colors in the scale
+  theme(legend.position = "none", axis.text.x = element_text(size = 22, angle = 90, hjust = 1, vjust = 0.5), axis.text.y = element_text(size = 22), axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab("Number of Genes Expressed") + ylab("% of Mitochondrial Reads") +
+  scale_x_continuous(breaks = seq(0, 10000, by = 2000)) +
+  scale_y_continuous(breaks = seq(0, 100, by = 10)) +
+  coord_cartesian(xlim = c(0, 10000), ylim = c(0, 100)) +
+  geom_hline(yintercept = 20, linetype = "dashed", col = "red", size = 1) + 
+  geom_vline(xintercept = 2000, linetype = "dashed", col = "red", size = 1)
+scatterPlot
+ggsave(scatterPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/plots NME/PreQC_SANTB00134_NME_genesdetected_versus_percentmtreads_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+##Do the same with nCountRNA.
+scatterPlot <- ggplot(SANTB00134_NME@meta.data, aes(x = nCount_RNA, y = percent.mt)) +
+  theme_light() +
+  geom_point(size = 2) +
+  geom_pointdensity(adjust = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(8)) + ## colors in the scale
+  theme(legend.position = "none", axis.text.x = element_text(size = 22, angle = 90, hjust = 1, vjust = 0.5), axis.text.y = element_text(size = 22), axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab("Number of UMI Counts") + ylab("% of Mitochondrial Reads") +
+  scale_x_continuous(breaks = seq(0, 100000, by = 25000)) +
+  scale_y_continuous(breaks = seq(0, 100, by = 10)) +
+  coord_cartesian(xlim = c(0, 100000), ylim = c(0, 100)) +
+  geom_hline(yintercept = 20, linetype = "dashed", col = "red", size = 1) + 
+  geom_vline(xintercept = 55000, linetype = "dashed", col = "red", size = 1)
+scatterPlot
+ggsave(scatterPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/plots NME/PreQC_SANTB00134_NME_umicounts_versus_percentmtreads_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+## Plot of # of HKG genes expressed VS # of genes detected. 
+scatterPlot <- ggplot(SANTB00134_NME@meta.data, aes(x = nFeature_RNA, y = n.exp.hkgenes)) +
+  theme_light() +
+  geom_point(size = 2) +
+  geom_pointdensity(adjust = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(8)) +
+  theme(legend.position = "none", axis.text.x = element_text(size = 22, angle = 90, hjust = 1, vjust = 0.5), axis.text.y = element_text(size = 22), axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab("Number of genes detected") + ylab("HK genes expressed") +
+  scale_x_continuous(breaks = seq(0, 10000, by = 2000)) +
+  scale_y_continuous(breaks = seq(0, 100, by = 10)) +
+  coord_cartesian(xlim = c(0, 10000), ylim = c(0, 100)) +
+  geom_hline(yintercept = 70, linetype = "dashed", col = "red", size = 1) + 
+  geom_vline(xintercept = 2000, linetype = "dashed", col = "red", size = 1)
+scatterPlot
+ggsave(scatterPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/plots NME/PreQC_SANTB00134_NME_genesdetected_versus_nexpHKgenes_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+##Do the same with nCountRNA.
+scatterPlot <- ggplot(SANTB00134_NME@meta.data, aes(x = nCount_RNA, y = n.exp.hkgenes)) +
+  theme_light() +
+  geom_point(size = 2) +
+  geom_pointdensity(adjust = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(8)) +
+  theme(legend.position = "none", axis.text.x = element_text(size = 22, angle = 90, hjust = 1, vjust = 0.5), axis.text.y = element_text(size = 22), axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab("Number of UMI counts") + ylab("HK genes expressed") +
+  scale_x_continuous(breaks = seq(0, 100000, by = 25000)) +
+  scale_y_continuous(breaks = seq(0, 100, by = 10)) +
+  coord_cartesian(xlim = c(0, 100000), ylim = c(0, 100)) +
+  geom_hline(yintercept = 70, linetype = "dashed", col = "red", size = 1) + 
+  geom_vline(xintercept = 55000, linetype = "dashed", col = "red", size = 1)
+scatterPlot
+ggsave(scatterPlot, filename = paste(datadirectory, "/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/plots NME/PreQC_SANTB00134_NME_umicounts_versus_nexpHKgenes_per_cell_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+```
+
+5. ***Now we filter out any dead cells and cells with low numbers of HK genes***
+```{QC of  Seurat Object}
+## Load combined datasets
+set.seed(1)
+file_names <- list.files(paste0(cell_line_directory,"/Combined Data"), pattern = "GBM_*",full.names = T)
+## Here we load the combined, downsampled dataset - GBM_700cells
+lapply(file_names[2], load, .GlobalEnv) ##Make sure you load the FILTERED GBM_ALL data - they are both named 'Bardy_10x' in R 
+rm(file_names)
+
+## Filter the cells based on the quality control metrics: filtering based on (1) # of detected genes, (2) percent mitochondrial reads, (3) no. of housekeeping genes expressed
+SANTB00134_NME_QC <- subset(x = SANTB00134_NME, subset = nFeature_RNA >= 2000 & percent.mt < 20 & n.exp.hkgenes >= 70 & nCount_RNA < 55000)
+## We will remove cells with < 2000 genes detected, with 20% or more mitochondrial reads, and with less than 70 hKG expressed
+dim(SANTB00134_NME_QC) ## 23805 genes and 6512 cells AFTER filtering
+dim(SANTB00134_NME) ## 23805 genes and 8772 cells BEFORE filtering
+##save(SANTB00134_NME_QC, file = paste0(datadirectory,"/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/RData_NME/SANTB00134_NME_QC.Rdata"))
+
+## We will use the cells that were used for previous analyses.
+Bardy_10x_134 <- rownames(GBM_700cells@meta.data)[GBM_700cells$PatientID == "SANTB00134"]
+NME_cells <- rownames(SANTB00134_NME_QC@meta.data)[SANTB00134_NME_QC$Condition == "NME"]
+## remove the appended "134_CSF" or "134_TME" from cell names
+cell_names <- gsub("134_CSF_", "", Bardy_10x_134)
+cell_names <- gsub("134_TME_", "", cell_names)
+cell_names <- c(cell_names, NME_cells)
+
+## First subset the QC data by the cells used in previous analyses
+Idents(SANTB00134_NME_QC) <- "Condition"
+SANTB00134_NME_Downsample <- subset(SANTB00134_NME_QC, cells = cell_names)
+
+## Count how many cells are in each condition
+cells_per_condition <- SANTB00134_NME_Downsample@meta.data %>% group_by(Condition) %>% tally()
+## Now downsample dataset to contain equal numbers of cells.
+Idents(SANTB00134_NME_Downsample) <- "Condition"
+SANTB00134_NME_Downsample <- subset(SANTB00134_NME_Downsample, downsample = 651)
+
+## Check how many cells are there after downsampling
+cells_per_condition <- SANTB00134_NME_Downsample@meta.data %>% group_by(Condition) %>% tally()
+
+
+##save(SANTB00134_NME_Downsample, file = paste0(datadirectory,"/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/RData_NME/SANTB00134_NME_QC_Downsampled.Rdata"))
+```
+
+6. ***Normalise, scale and perform a linear dimensionality reduction using PCA***
+```{Normalise, scale and perform a linear dimensionality reduction using PCA}
+load(paste0(datadirectory,"/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/RData_NME/SANTB00134_NME_QC_Downsampled.Rdata"))
+
+SANTB00134_NME_Downsample <- NormalizeData(SANTB00134_NME_Downsample, normalization.method = "LogNormalize")
+SANTB00134_NME_Downsample <- FindVariableFeatures(SANTB00134_NME_Downsample, nfeatures = 2000)
+SANTB00134_NME_Downsample <- ScaleData(SANTB00134_NME_Downsample) ##you can use the vars.to.regress to filter out any patient batch effects
+
+####Dimensionality Reduction#######
+## Here we use the top variable features (n = 2000) identified to conduct a dimensionality reduction
+SANTB00134_NME_Downsample <- RunPCA(SANTB00134_NME_Downsample, npcs = 100, features = VariableFeatures(SANTB00134_NME_Downsample)) ##Compute 15 PCs 
+
+##Visualise the variance, we can then use this to determine which PCs contain the most variances
+ElbowPlot(SANTB00134_NME_Downsample, ndims = 100, reduction = "pca")
+
+SANTB00134_NME_Downsample <- FindNeighbors(SANTB00134_NME_Downsample, reduction = "pca", dims = 1:25)
+SANTB00134_NME_Downsample <- FindClusters(SANTB00134_NME_Downsample, resolution = 0.05)
+SANTB00134_NME_Downsample <- RunUMAP(SANTB00134_NME_Downsample, reduction = "pca", dims = 1:25)
+
+umap <- DimPlot(SANTB00134_NME_Downsample, reduction = "umap", pt.size = 0.8, label = FALSE, repel = FALSE, group.by = "Condition", cols = c("red","goldenrod1","black"))  + ##you can replace the group.by variable to any column on the metadata
+  theme(legend.position = "none", legend.text = element_text(size = 22), legend.justification = "center", 
+        axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
+        axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22),
+        panel.border = element_rect(fill=NA, colour = "black", size=1.5))  + 
+  coord_cartesian(xlim = c(-10,12), ylim = c(-8, 10))
+umap
+ggsave(umap, filename = paste(plotsdirectory, "SANTB00134_Condition_NoLegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+RP <- RidgePlot(SANTB00134_NME_Downsample, group.by = c("Condition"), features = "NUPR1", sort = "Condition", cols = c( "red", "goldenrod1","black"), log = TRUE)  + ##you can replace the group.by variable to any column on the metadata
+  theme(legend.position = "none", legend.text = element_text(size = 16), legend.justification = "center")
+RP
+ggsave(RP, filename = paste(plotsdirectory, "SANTB00134_RP_NUPR1Expression_Condition_NoLegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+```
+
+7. ***We will now add some more metadata based on Neftel's MetaModules and CellCycle data***
+```{Add Neftel metamodule data}
+##We will now go on to calculate a MES, AC, OPC and NPC-like score for each cell in the dataset based on the expression of genes provided by Neftel
+## Load the Neftel gene expression signatures
+signatures <- read.table(file = paste0(datadirectory, "/reference_sheets/IDHwt.GBM.MetaModules.tsv", sep = ""), header = TRUE)
+##For MESlike and NPClike features, we extract the unique signatures from both MES/NPClike1 and 2. We then remove any NA values. 
+MESlike_features <- unique(c(signatures$MESlike2, signatures$MESlike1))
+MESlike_features <- MESlike_features[!is.na(MESlike_features)]
+
+NPClike_features <- unique(c(signatures$NPClike2, signatures$NPClike1))
+NPClike_features <- NPClike_features[!is.na(NPClike_features)]
+
+signatures_list <- list("MESlike" = as.character(MESlike_features), "AClike" = as.character(signatures$AClike), "OPClike" = as.character(signatures$OPClike), "NPClike" = as.character(NPClike_features), "MESlike1" = as.character(signatures$MESlike1), "MESlike2" = as.character(signatures$MESlike2),  "NPClike1" = as.character(signatures$NPClike1), "NPClike2" = as.character(signatures$NPClike2))
+
+signatures_list <- lapply(signatures_list, function(x){
+  x[!is.na(x)]
+})
+
+
+## Calculate MESlike, AClike, OPClike and NPClike scores for each sample ####
+SANTB00134_NME_Downsample <- AddModuleScore(
+  object = SANTB00134_NME_Downsample,
+  features = signatures_list[1:4],
+  name = c("MESlike", "AClike", "OPClike", "NPClike"),
+  nbin = 30,
+  ctrl = 100,
+  seed = 1,
+  search = TRUE
+)
+names(SANTB00134_NME_Downsample@meta.data)[11:14] <- c("MESlike.Score", "AClike.Score", "OPClike.Score", "NPClike.Score")
+
+
+###We now run some calculations before generating the Neftel_Quadrants. 
+maxn <- function(n) function(x) order(x, decreasing = TRUE)[n] # a function that returns the position of n-th largest
+
+## Calculate max scores for OPC-NPC vs AC-MES
+##Here, the function assess the  NPC and OPC-like score and takes the largest value of the two and creates a new column with the largest value. 
+SANTB00134_NME_Downsample@meta.data$MaxScore_OPC.NPC <- apply(SANTB00134_NME_Downsample@meta.data[, 13:14], 1, function(x)x[maxn(1)(x)]) ## value of the largest score
+SANTB00134_NME_Downsample@meta.data$MaxScore_AC.MES <- apply(SANTB00134_NME_Downsample@meta.data[, 11:12], 1, function(x)x[maxn(1)(x)])
+## Calculate D1
+SANTB00134_NME_Downsample@meta.data$D1 <- with(SANTB00134_NME_Downsample@meta.data, MaxScore_OPC.NPC - MaxScore_AC.MES)
+## Classify D1 > 0 as OPC-NPC cells, and D1 < 0 as AC-MES cells
+SANTB00134_NME_Downsample@meta.data$combGroup1 <- c("EMPTY")
+SANTB00134_NME_Downsample@meta.data$combGroup1[SANTB00134_NME_Downsample@meta.data$D1 > 0] <- "OPC_NPC"
+SANTB00134_NME_Downsample@meta.data$combGroup1[SANTB00134_NME_Downsample@meta.data$D1 < 0] <- "AC_MES"
+
+## Calculate max scores for AC-OPC vs MES-NPC
+SANTB00134_NME_Downsample@meta.data$MaxScore_AC.OPC <- apply(SANTB00134_NME_Downsample@meta.data[, 12:13], 1, function(x)x[maxn(1)(x)])
+SANTB00134_NME_Downsample@meta.data$MaxScore_MES.NPC <- apply(SANTB00134_NME_Downsample@meta.data[, c(11,14)], 1, function(x)x[maxn(1)(x)])
+## Calculate D2
+SANTB00134_NME_Downsample@meta.data$D2 <- with(SANTB00134_NME_Downsample@meta.data, MaxScore_AC.OPC - MaxScore_MES.NPC)
+## Classify D2 > 0 as AC-OPC cells, and D1 < 0 as MES-NPC cells
+SANTB00134_NME_Downsample@meta.data$combGroup2 <- c("EMPTY")
+SANTB00134_NME_Downsample@meta.data$combGroup2[SANTB00134_NME_Downsample@meta.data$D2 > 0] <- "AC_OPC"
+SANTB00134_NME_Downsample@meta.data$combGroup2[SANTB00134_NME_Downsample@meta.data$D2 < 0] <- "MES_NPC"
+
+##We will now calculate a relative metamodule x and y score 
+SANTB00134_NME_Downsample@meta.data$rel.metamodule.y.score[SANTB00134_NME_Downsample@meta.data$combGroup1 == "OPC_NPC"] <- with(SANTB00134_NME_Downsample@meta.data[SANTB00134_NME_Downsample@meta.data$combGroup1 == "OPC_NPC",], log2((abs(OPClike.Score - NPClike.Score)) + 1))
+SANTB00134_NME_Downsample@meta.data$rel.metamodule.y.score[SANTB00134_NME_Downsample@meta.data$combGroup1 == "AC_MES"] <- with(SANTB00134_NME_Downsample@meta.data[SANTB00134_NME_Downsample@meta.data$combGroup1 == "AC_MES",], -log2((abs(AClike.Score - MESlike.Score)) + 1)) ## negative number for AC-MES
+
+SANTB00134_NME_Downsample@meta.data$rel.metamodule.x.score[SANTB00134_NME_Downsample@meta.data$combGroup2 == "AC_OPC"] <- with(SANTB00134_NME_Downsample@meta.data[SANTB00134_NME_Downsample@meta.data$combGroup2 == "AC_OPC",], -log2((abs(AClike.Score - OPClike.Score)) + 1)) ## negative number for AC-OPC
+SANTB00134_NME_Downsample@meta.data$rel.metamodule.x.score[SANTB00134_NME_Downsample@meta.data$combGroup2 == "MES_NPC"] <- with(SANTB00134_NME_Downsample@meta.data[SANTB00134_NME_Downsample@meta.data$combGroup2 == "MES_NPC",], log2((abs(MESlike.Score - NPClike.Score)) + 1))
+
+## Left-Top Quadrant: OPC-like
+## Right-Top Quadrant: NPC-like
+## Left-Bottom Quadrant: AC-like
+## Right-Bottom Quadrant: MES-like
+
+## Make graph with ggplot2
+## geom_pointdenisty from the ggpointdensity package (recently developed by Lukas Kremer and Simon Anders (2019)) allows you visualize density and individual data points at the same time
+## individual points are colored by the number of neighboring points. This allows you to see the overall distribution, as well as individual points
+library(ggplot2)
+library(ggpointdensity)
+int_breaks <- function(x, n = 5) pretty(x, n)[pretty(x, n) %% 1 == 0] ## function to generate only whole-integer breaks for x and y axis ticks
+scatterPlot <- ggplot(SANTB00134_NME_Downsample@meta.data, aes(x = rel.metamodule.x.score, y = rel.metamodule.y.score)) + ## transform to change the order of the plots in facet_wrap()
+  geom_vline(xintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_hline(yintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_point(size = 2) +
+  geom_pointdensity(adjust = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(25),
+                         breaks = seq(0,500,100),
+                         limits = c(0,500)) +
+  ## scale_color_viridis_c() +
+  facet_wrap(~Condition) +
+  theme_bw() +
+  theme(legend.position = "right", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20), axis.title.y = element_text(size = 20), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab(expression(atop("Relative meta-module score", paste("[log2(|SC1-SC2|+1)]")))) + ylab(expression(atop("Relative meta-module score", paste("[log2(|SC1-SC2|+1)]")))) +
+  scale_x_continuous(breaks = int_breaks) +
+  scale_y_continuous(breaks = int_breaks) +
+  coord_cartesian(xlim = c(-1.25, 1.25), ylim = c(-1.25, 1.25))
+scatterPlot
+ggsave(scatterPlot, filename = paste(plotsdirectory, "SANTB00134_metamodules_alltumours_scale0-2800_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+## Calculate number of cells in each quadrant
+SANTB00134_NME_Downsample@meta.data$Quadrant <- c("EMPTY")
+SANTB00134_NME_Downsample@meta.data$Quadrant[SANTB00134_NME_Downsample@meta.data$rel.metamodule.x.score < 0 & SANTB00134_NME_Downsample@meta.data$rel.metamodule.y.score < 0] <- "AClike"
+SANTB00134_NME_Downsample@meta.data$Quadrant[SANTB00134_NME_Downsample@meta.data$rel.metamodule.x.score < 0 & SANTB00134_NME_Downsample@meta.data$rel.metamodule.y.score > 0] <- "OPClike"
+SANTB00134_NME_Downsample@meta.data$Quadrant[SANTB00134_NME_Downsample@meta.data$rel.metamodule.x.score > 0 & SANTB00134_NME_Downsample@meta.data$rel.metamodule.y.score > 0] <- "NPClike"
+SANTB00134_NME_Downsample@meta.data$Quadrant[SANTB00134_NME_Downsample@meta.data$rel.metamodule.x.score > 0 & SANTB00134_NME_Downsample@meta.data$rel.metamodule.y.score < 0] <- "MESlike"
+
+cellstate_percondition <- SANTB00134_NME_Downsample@meta.data %>% group_by(Condition, Quadrant) %>% tally()
+write.csv(as.data.frame(cellstate_percondition), file = paste0(workingdirectory, "SANTB00134_cellstate_percondition.csv"), quote = FALSE)
+
+## Calculate MESlike1,2 and NPClikw1,2 scores for each sample
+SANTB00134_NME_Downsample <- AddModuleScore(
+  object = SANTB00134_NME_Downsample,
+  features = signatures_list[5:8],
+  name = c("MESlike1", "MESlike2", "NPClike1", "NPClike2"),
+  nbin = 30,
+  ctrl = 100,
+  seed = 1,
+  search = T
+)
+
+names(SANTB00134_NME_Downsample@meta.data)[26:29] <- c("MESlike1.Score", "MESlike2.Score", "NPClike1.Score", "NPClike2.Score")
+
+SANTB00134_NME_Downsample$MESlike <- ifelse(SANTB00134_NME_Downsample$MESlike1.Score > SANTB00134_NME_Downsample$MESlike2.Score, "MESlike1", 
+       ifelse(SANTB00134_NME_Downsample$MESlike1.Score < SANTB00134_NME_Downsample$MESlike2.Score, "MESlike2", "notMESlike"))
+unique(SANTB00134_NME_Downsample$MESlike)
+
+SANTB00134_NME_Downsample$NPClike <- ifelse(SANTB00134_NME_Downsample$NPClike1.Score > SANTB00134_NME_Downsample$NPClike2.Score, "NPClike1", 
+       ifelse(SANTB00134_NME_Downsample$NPClike1.Score < SANTB00134_NME_Downsample$NPClike2.Score, "NPClike2", "notNPClike"))
+unique(SANTB00134_NME_Downsample$NPClike)
+```
+
+7b. ***We will also calculate proliferation and quiescence scores.***
+```{Calculate Proliferation and Quiescence scores}
+##We will now do the same for cycling cells####
+##Calculating Module Scores
+cellcycle <- read.table(file = paste0(datadirectory, "/reference_sheets/cellcycle_tirosh.tsv"), header = TRUE)
+quiescence_atkins <- read.table(file = paste0(datadirectory, "/reference_sheets/top50quiescent_atkins.txt"), header = TRUE)
+
+cellcycle_list <- list("G1S" = as.character(cellcycle$G1.S), "G2M" = as.character(cellcycle$G2.M), "Quiescent" = as.character(quiescence_atkins$Genes))
+
+cellcycle_list <- lapply(cellcycle_list, function(x){
+  x[!is.na(x)]
+})
+
+## Calculate G1S and G2M scores for each sample
+SANTB00134_NME_Downsample <- AddModuleScore(
+  object = SANTB00134_NME_Downsample,
+  features = cellcycle_list,
+  name = c("G1S.Score", "G2M.Score", "Quiescent.Score"),
+  nbin = 30,
+  ctrl = 100,
+  seed = 1,
+  search = TRUE
+)
+names(SANTB00134_NME_Downsample@meta.data)[32:34] <- c("G1S.Score", "G2M.Score", "Quiescent.Score")
+
+SANTB00134_NME_Downsample$Proliferation.Score <- (SANTB00134_NME_Downsample$G1S.Score + SANTB00134_NME_Downsample$G2M.Score)/2
+SANTB00134_NME_Downsample$Cell_Cycle <- "NULL"
+SANTB00134_NME_Downsample$Cell_Cycle[SANTB00134_NME_Downsample@meta.data$Proliferation.Score < 0] <- "NonCycling"
+SANTB00134_NME_Downsample$Cell_Cycle[SANTB00134_NME_Downsample@meta.data$Proliferation.Score > 0] <- "Cycling"
+unique(SANTB00134_NME_Downsample$Cell_Cycle)
+SANTB00134_NME_Downsample$CellCycle_Condition <- paste(SANTB00134_NME_Downsample$Cell_Cycle, SANTB00134_NME_Downsample$Condition, sep = "_")
+
+cellstate_cellcycle <- SANTB00134_NME_Downsample@meta.data %>% group_by(Cell_Cycle, Quadrant) %>% tally()
+write.csv(as.data.frame(cellstate_cellcycle), file = paste0(workingdirectory, "SANTB00134_cellstate_cellcycle.csv"), quote = FALSE)
+
+cellstate_cellcycle_condition <- SANTB00134_NME_Downsample@meta.data %>% group_by(CellCycle_Condition, Quadrant) %>% tally()
+write.csv(as.data.frame(cellstate_cellcycle_condition), file = paste0(workingdirectory, "SANTB00134_cellstate_cellcycle_condition.csv"), quote = FALSE)
+
+##We now calculate a cell cycle difference score as in https://satijalab.org/seurat/archive/v2.4/cell_cycle_vignette.html this will help us regress out differences in the 'cycling phase' of cycling cells whilst maintaining differences between cycling and non-cycling cells. 
+SANTB00134_NME_Downsample$CellCycleDifference.Score <- SANTB00134_NME_Downsample$G1S.Score - SANTB00134_NME_Downsample$G2M.Score
+
+SANTB00134_NME_Downsample$Quiescence <- "NULL"
+SANTB00134_NME_Downsample$Quiescence[SANTB00134_NME_Downsample@meta.data$Quiescent.Score < 0] <- "NonQuiescent"
+SANTB00134_NME_Downsample$Quiescence[SANTB00134_NME_Downsample@meta.data$Quiescent.Score > 0] <- "Quiescent"
+
+library(ggpointdensity)
+int_breaks <- function(x, n = 5) pretty(x, n)[pretty(x, n) %% 1 == 0] ## function to generate only whole-integer breaks for x and y axis ticks
+scatterPlot <- ggplot(SANTB00134_NME_Downsample@meta.data, aes(x = G1S.Score , y = G2M.Score)) + ## transform to change the order of the plots in facet_wrap()
+  geom_vline(xintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_hline(yintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_point(size = 2) +
+  geom_pointdensity(adjust = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(25),
+                         breaks = seq(0,600,100),
+                         limits = c(0,600)) +
+  ## scale_color_viridis_c() +
+   facet_wrap( ~ Condition) +
+  theme_bw() +
+  theme(legend.position = "right", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20), axis.title.y = element_text(size = 20), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab(expression(atop("G1S Score"))) + ylab(expression(atop("G2M Score"))) +
+  scale_x_continuous(breaks = int_breaks) +
+  scale_y_continuous(breaks = int_breaks) +
+  coord_cartesian(xlim = c(-0.5,1.25), ylim = c(-0.5, 1.75))
+scatterPlot
+ggsave(scatterPlot, filename = paste(plotsdirectory, "SANTB00134_proliferation_alltumours_scale0-3800_nnolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+int_breaks <- function(x, n = 5) pretty(x, n)[pretty(x, n) %% 1 == 0] ## function to generate only whole-integer breaks for x and y axis ticks
+scatterPlot <- ggplot(SANTB00134_NME_Downsample@meta.data, aes(x = MESlike2.Score , y = Proliferation.Score)) + ## transform to change the order of the plots in facet_wrap()
+  geom_vline(xintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_hline(yintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_point(size = 2) +
+  geom_pointdensity(adjust = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(25),
+                         breaks = seq(0,500,100),
+                         limits = c(0,500)) +
+  ## scale_color_viridis_c() +
+  facet_wrap( ~ Condition) +
+  theme_bw() +
+  theme(legend.position = "right", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20), axis.title.y = element_text(size = 20), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab(expression(atop("Relative MESlike Score"))) + ylab(expression(atop("Proliferation Score"))) +
+  scale_x_continuous(breaks = int_breaks) +
+  scale_y_continuous(breaks = int_breaks) +
+  coord_cartesian(xlim = c(-0.5,1), ylim = c(-0.5, 1))
+scatterPlot
+ggsave(scatterPlot, filename = paste(plotsdirectory, "SANTB00134_proliferation_MESlike_alltumours_scale0-20000_legend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+library(ggpointdensity)
+int_breaks <- function(x, n = 5) pretty(x, n)[pretty(x, n) %% 1 == 0] ## function to generate only whole-integer breaks for x and y axis ticks
+scatterPlot <- ggplot(SANTB00134_NME_Downsample@meta.data, aes(x = MESlike.Score , y = Quiescent.Score)) + ## transform to change the order of the plots in facet_wrap()
+  geom_vline(xintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_hline(yintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_point(size = 2) +
+  geom_pointdensity(adjust = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'Spectral')))(25),
+                         breaks = seq(0,20000,5000),
+                         limits = c(0,20000)) +
+  ## scale_color_viridis_c() +
+  ## facet_wrap( ~ Condition_PatientID) +
+  theme_bw() +
+  theme(legend.position = "right", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20), axis.title.y = element_text(size = 20), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab(expression(atop("Relative MESlike Score"))) + ylab(expression(atop("Quiescence Score"))) +
+  scale_x_continuous(breaks = int_breaks) +
+  scale_y_continuous(breaks = int_breaks) +
+  coord_cartesian(xlim = c(-0.5,1), ylim = c(-0.5, 1))
+scatterPlot
+ggsave(scatterPlot, filename = paste(plotsdirectory, "SANTB00134_proliferation_quiescence_alltumours_scale0-20000_legend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+library(ggplot2)
+library(ggpointdensity)
+SANTB00134_NME_Downsample$Condition <- factor(SANTB00134_NME_Downsample$Condition, levels = c("TME", "NME","CSF"))
+int_breaks <- function(x, n = 5) pretty(x, n)[pretty(x, n) %% 1 == 0] ## function to generate only whole-integer breaks for x and y axis ticks
+scatterPlot <- ggplot(SANTB00134_NME_Downsample@meta.data, aes(x = rel.metamodule.x.score, y = rel.metamodule.y.score)) + ## transform to change the order of the plots in facet_wrap()
+  geom_vline(xintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_hline(yintercept=0, linetype="dotted", color = "black", size = 0.5) +
+  geom_point(aes(color = SANTB00134_NME_Downsample$Quiescent.Score), size = 1, alpha = 0.5) +
+  scale_colour_gradientn(colours = colorRampPalette(rev(brewer.pal(11,'RdBu')))(25),
+                        breaks = seq(-0.4,0.4,0.2), ##Change scale when changing between Quiescence or Proliferation scores.
+                         limits = c(-0.4,0.4)) +
+  ## scale_color_viridis_c() +
+  facet_wrap( ~ Condition) + ##Split graph by condition.
+  theme_bw() +
+  theme(legend.position = "right", axis.text.x = element_text(size = 20), axis.text.y = element_text(size = 20), axis.title.x = element_text(size = 20), axis.title.y = element_text(size = 20), panel.border = element_rect(fill=NA, colour = "black", size=1.5)) +
+  xlab(expression(atop("Relative meta-module score", paste("[log2(|SC1-SC2|+1)]")))) + ylab(expression(atop("Relative meta-module score", paste("[log2(|SC1-SC2|+1)]")))) +
+  scale_x_continuous(breaks = int_breaks) +
+  scale_y_continuous(breaks = int_breaks) +
+  coord_cartesian(xlim = c(-1.25, 1.25), ylim = c(-1.25, 1.25))
+scatterPlot
+ggsave(scatterPlot, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_metamodule_proliferation_all_nolegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
+
+write.csv(SANTB00134_NME_Downsample@meta.data, file = paste0(datadirectory,"/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/SANTB00134_NME_QC_Downsampled_Metadata.csv"))
+
+save(SANTB00134_NME_Downsample, file = paste0(datadirectory,"/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134/RData_NME/SANTB00134_NME_QC_Downsampled.Rdata"))
+```
+
+8. ***Calculate NUPR1 average expression across the three conditions***
+```{We will now look at Average NUPR1 expression in SANTB00134 NM, GM and CSF}
+## To see how the seurat object was created please see Rmarkdown file "SANTB00134_GM_NM_CSF"
+##Calculate average expression of genes and extract RNA counts from list
+matrix <- AverageExpression(SANTB00134_NME_Downsample, assays = "RNA")
+matrix <- matrix$RNA
+## Subset list for NUPR1
+matrix <- matrix[rownames(matrix) %in% "NUPR1",]
+
+## save expression matrix to be visualised on Prism
+write.csv(matrix, file = paste0(datadirectory, "/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134_NME_QC_Downsampled_LathiaStemCellGenes_AvExpression.csv"))
+```
