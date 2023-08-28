@@ -58,220 +58,6 @@ library(devtools)
 install_github("jokergoo/simplifyEnrichment")
 ```
 
-1b.  **Load functions for downstream analyses**
-```{Function for DoMultiBarHeatmap}
-# Create function for DoHeatmap with multiple annotation
-suppressPackageStartupMessages({
-  library(rlang)
-})
-DoMultiBarHeatmap <- function (object, 
-                               features = NULL, 
-                               cells = NULL, 
-                               group.by = "ident", 
-                               additional.group.by = NULL, 
-                               additional.group.sort.by = NULL, 
-                               cols.use = NULL,
-                               group.bar = TRUE, 
-                               disp.min = -2.5, 
-                               disp.max = NULL, 
-                               slot = "scale.data", 
-                               assay = NULL, 
-                               label = TRUE, 
-                               size = 5.5, 
-                               hjust = 0, 
-                               angle = 45, 
-                               raster = TRUE, 
-                               draw.lines = TRUE, 
-                               lines.width = NULL, 
-                               group.bar.height = 0.02, 
-                               combine = TRUE) 
-{
-  cells <- cells %||% colnames(x = object)
-  if (is.numeric(x = cells)) {
-    cells <- colnames(x = object)[cells]
-  }
-  assay <- assay %||% DefaultAssay(object = object)
-  DefaultAssay(object = object) <- assay
-  features <- features %||% VariableFeatures(object = object)
-  ## Why reverse???
-  features <- rev(x = unique(x = features))
-  disp.max <- disp.max %||% ifelse(test = slot == "scale.data", 
-                                   yes = 2.5, no = 6)
-  possible.features <- rownames(x = GetAssayData(object = object, 
-                                                 slot = slot))
-  if (any(!features %in% possible.features)) {
-    bad.features <- features[!features %in% possible.features]
-    features <- features[features %in% possible.features]
-    if (length(x = features) == 0) {
-      stop("No requested features found in the ", slot, 
-           " slot for the ", assay, " assay.")
-    }
-    warning("The following features were omitted as they were not found in the ", 
-            slot, " slot for the ", assay, " assay: ", paste(bad.features, 
-                                                             collapse = ", "))
-  }
-  
-  if (!is.null(additional.group.sort.by)) {
-    if (any(!additional.group.sort.by %in% additional.group.by)) {
-      bad.sorts <- additional.group.sort.by[!additional.group.sort.by %in% additional.group.by]
-      additional.group.sort.by <- additional.group.sort.by[additional.group.sort.by %in% additional.group.by]
-      if (length(x = bad.sorts) > 0) {
-        warning("The following additional sorts were omitted as they were not a subset of additional.group.by : ", 
-                paste(bad.sorts, collapse = ", "))
-      }
-    }
-  }
-  
-  data <- as.data.frame(x = as.matrix(x = t(x = GetAssayData(object = object, 
-                                                             slot = slot)[features, cells, drop = FALSE])))
-  
-  object <- suppressMessages(expr = StashIdent(object = object, 
-                                               save.name = "ident"))
-  group.by <- group.by %||% "ident"
-  groups.use <- object[[c(group.by, additional.group.by[!additional.group.by %in% group.by])]][cells, , drop = FALSE]
-  plots <- list()
-  for (i in group.by) {
-    data.group <- data
-    if (!is_null(additional.group.by)) {
-      additional.group.use <- additional.group.by[additional.group.by!=i]  
-      if (!is_null(additional.group.sort.by)){
-        additional.sort.use = additional.group.sort.by[additional.group.sort.by != i]  
-      } else {
-        additional.sort.use = NULL
-      }
-    } else {
-      additional.group.use = NULL
-      additional.sort.use = NULL
-    }
-    
-    group.use <- groups.use[, c(i, additional.group.use), drop = FALSE]
-    
-    for(colname in colnames(group.use)){
-      if (!is.factor(x = group.use[[colname]])) {
-        group.use[[colname]] <- factor(x = group.use[[colname]])
-      }  
-    }
-    
-    if (draw.lines) {
-      lines.width <- lines.width %||% ceiling(x = nrow(x = data.group) * 
-                                                0.0025)
-      placeholder.cells <- sapply(X = 1:(length(x = levels(x = group.use[[i]])) * 
-                                           lines.width), FUN = function(x) {
-                                             return(Seurat:::RandomName(length = 20))
-                                           })
-      placeholder.groups <- data.frame(rep(x = levels(x = group.use[[i]]), times = lines.width))
-      group.levels <- list()
-      group.levels[[i]] = levels(x = group.use[[i]])
-      for (j in additional.group.use) {
-        group.levels[[j]] <- levels(x = group.use[[j]])
-        placeholder.groups[[j]] = NA
-      }
-      
-      colnames(placeholder.groups) <- colnames(group.use)
-      rownames(placeholder.groups) <- placeholder.cells
-      
-      group.use <- sapply(group.use, as.vector)
-      rownames(x = group.use) <- cells
-      
-      group.use <- rbind(group.use, placeholder.groups)
-      
-      for (j in names(group.levels)) {
-        group.use[[j]] <- factor(x = group.use[[j]], levels = group.levels[[j]])
-      }
-      
-      na.data.group <- matrix(data = NA, nrow = length(x = placeholder.cells), 
-                              ncol = ncol(x = data.group), dimnames = list(placeholder.cells, 
-                                                                           colnames(x = data.group)))
-      data.group <- rbind(data.group, na.data.group)
-    }
-    
-    order_expr <- paste0('order(', paste(c(i, additional.sort.use), collapse=','), ')')
-    group.use = with(group.use, group.use[eval(parse(text=order_expr)), , drop=F])
-    
-    plot <- Seurat:::SingleRasterMap(data = data.group, raster = raster, 
-                                     disp.min = disp.min, disp.max = disp.max, feature.order = features, 
-                                     cell.order = rownames(x = group.use), group.by = group.use[[i]])
-    
-    if (group.bar) {
-      pbuild <- ggplot_build(plot = plot)
-      group.use2 <- group.use
-      cols <- list()
-      na.group <- Seurat:::RandomName(length = 20)
-      for (colname in rev(x = colnames(group.use2))) {
-        if (colname == i) {
-          colid = paste0('Identity (', colname, ')')
-        } else {
-          colid = colname
-        }
-        
-        # Default
-        cols[[colname]] <- c(scales::hue_pal()(length(x = levels(x = group.use[[colname]]))))  
-        
-        #Overwrite if better value is provided
-        if (!is_null(cols.use[[colname]])) {
-          req_length = length(x = levels(group.use))
-          if (length(cols.use[[colname]]) < req_length){
-            warning("Cannot use provided colors for ", colname, " since there aren't enough colors.")
-          } else {
-            if (!is_null(names(cols.use[[colname]]))) {
-              if (all(levels(group.use[[colname]]) %in% names(cols.use[[colname]]))) {
-                cols[[colname]] <- as.vector(cols.use[[colname]][levels(group.use[[colname]])])
-              } else {
-                warning("Cannot use provided colors for ", colname, " since all levels (", paste(levels(group.use[[colname]]), collapse=","), ") are not represented.")
-              }
-            } else {
-              cols[[colname]] <- as.vector(cols.use[[colname]])[c(1:length(x = levels(x = group.use[[colname]])))]
-            }
-          }
-        }
-        
-        # Add white if there's lines
-        if (draw.lines) {
-          levels(x = group.use2[[colname]]) <- c(levels(x = group.use2[[colname]]), na.group)  
-          group.use2[placeholder.cells, colname] <- na.group
-          cols[[colname]] <- c(cols[[colname]], "#FFFFFF")
-        }
-        names(x = cols[[colname]]) <- levels(x = group.use2[[colname]])
-        
-        y.range <- diff(x = pbuild$layout$panel_params[[1]]$y.range)
-        y.pos <- max(pbuild$layout$panel_params[[1]]$y.range) + y.range * 0.015
-        y.max <- y.pos + group.bar.height * y.range
-        pbuild$layout$panel_params[[1]]$y.range <- c(pbuild$layout$panel_params[[1]]$y.range[1], y.max)
-        
-        plot <- suppressMessages(plot + 
-                                   annotation_raster(raster = t(x = cols[[colname]][group.use2[[colname]]]),  xmin = -Inf, xmax = Inf, ymin = y.pos, ymax = y.max) + 
-                                   annotation_custom(grob = grid::textGrob(label = colid, hjust = 0, gp = gpar(cex = 0.75)), ymin = mean(c(y.pos, y.max)), ymax = mean(c(y.pos, y.max)), xmin = Inf, xmax = Inf) +
-                                   coord_cartesian(ylim = c(0, y.max), clip = "off")) 
-        
-        if ((colname == i) && label) {
-          x.max <- max(pbuild$layout$panel_params[[1]]$x.range)
-          x.divs <- pbuild$layout$panel_params[[1]]$x.major %||% pbuild$layout$panel_params[[1]]$x$break_positions()
-          group.use$x <- x.divs
-          label.x.pos <- tapply(X = group.use$x, INDEX = group.use[[colname]],
-                                FUN = median) * x.max
-          label.x.pos <- data.frame(group = names(x = label.x.pos), 
-                                    label.x.pos)
-          plot <- plot + geom_text(stat = "identity", 
-                                   data = label.x.pos, aes_string(label = "group", 
-                                                                  x = "label.x.pos"), y = y.max + y.max * 
-                                     0.03 * 0.5, angle = angle, hjust = hjust, 
-                                   size = size)
-          plot <- suppressMessages(plot + coord_cartesian(ylim = c(0, 
-                                                                   y.max + y.max * 0.002 * max(nchar(x = levels(x = group.use[[colname]]))) * 
-                                                                     size), clip = "off"))
-        }
-      }
-    }
-    plot <- plot + theme(line = element_blank())
-    plots[[i]] <- plot
-  }
-  if (combine) {
-    plots <- CombinePlots(plots = plots)
-  }
-  return(plots)
-}
-```
-
 2.  ***Load the required RData files that have previously been QC'd***
 
 ```{Load RData files that have previously been QC'd}
@@ -282,7 +68,7 @@ lapply(file_names, load, .GlobalEnv)
 
 ## Load combined datasets
 set.seed(1)
-file_names <- list.files(cell_line_directory, pattern = "GBM_*",full.names = T)
+file_names <- list.files(paste0(cell_line_directory,"/Combined Data"), pattern = "GBM_*",full.names = T)
 lapply(file_names[2], load, .GlobalEnv) ##Make sure you load the FILTERED GBM_ALL data - they are both named 'Bardy_10x' in R
 rm(file_names)
 ```
@@ -381,40 +167,25 @@ Bardy_10x <- RunUMAP(Bardy_10x, reduction = "pca", dims = 1:25, n.components = 2
 ```{Add Neftel metamodule data}
 ##We will now go on to calculate a MES, AC, OPC and NPC-like score for each cell in the dataset based on the expression of genes provided by Neftel
 ## Load the Neftel gene expression signatures
-signatures <- read.table(file = paste0(datadirectory, "/reference_sheets/IDHwt.GBM.MetaModules.tsv", sep = "/"), header = TRUE)
+signatures <- read.table(file = paste0(datadirectory, "/reference_sheets/IDHwt.GBM.MetaModules.tsv", sep = ""), header = TRUE)
 
-######First we convert features to a list format####
-MESlike2_features <- as.character(signatures$MESlike2)
-MESlike1_features <- as.character(signatures$MESlike1)
-##For MESlike features, we extract the unique signatures from both MESlike1 and MESlike2. We then remove any NA values. 
-MESlike_features <- unique(c(MESlike2_features, MESlike1_features))
+##For MESlike and NPClike features, we extract the unique signatures from both MES/NPClike1 and 2. We then remove any NA values. 
+MESlike_features <- unique(c(signatures$MESlike2, signatures$MESlike1))
 MESlike_features <- MESlike_features[!is.na(MESlike_features)]
-##Generate list of MES signatures. 
-MESlike_features <- list(c(as.vector(MESlike_features)))
-MESlike1_features <- list(c(as.vector(MESlike1_features)))
-MESlike2_features <- list(c(as.vector(MESlike2_features)))
 
-##Repeat the above process for AClike, NPClike and OPClike features.
-AClike_features <- signatures$AClike
-AClike_features <- AClike_features[!is.na(AClike_features)]
-AClike_features <- list(c(as.vector(AClike_features)))
-
-OPClike_features <- signatures$OPClike
-OPClike_features <- OPClike_features[!is.na(OPClike_features)]
-OPClike_features <- list(c(as.vector(OPClike_features)))
-
-NPClike2_features <- as.character(signatures$NPClike2)
-NPClike1_features <- as.character(signatures$NPClike1)
-NPClike_features <- unique(c(NPClike2_features, NPClike1_features))
+NPClike_features <- unique(c(signatures$NPClike2, signatures$NPClike1))
 NPClike_features <- NPClike_features[!is.na(NPClike_features)]
-NPClike_features <- list(c(NPClike_features))
-NPClike1_features <- list(c(NPClike1_features))
-NPClike2_features <- list(c(NPClike2_features))
+
+signatures_list <- list("MESlike" = as.character(MESlike_features), "AClike" = as.character(signatures$AClike), "OPClike" = as.character(signatures$OPClike), "NPClike" = as.character(NPClike_features), "MESlike1" = as.character(signatures$MESlike1), "MESlike2" = as.character(signatures$MESlike2),  "NPClike1" = as.character(signatures$NPClike1), "NPClike2" = as.character(signatures$NPClike2))
+
+signatures_list <- lapply(signatures_list, function(x){
+  x[!is.na(x)]
+})
 
 ## Calculate MESlike, AClike, OPClike and NPClike scores for each sample ####
 Bardy_10x <- AddModuleScore(
   object = Bardy_10x,
-  features = c(MESlike_features, AClike_features, OPClike_features, NPClike_features),
+  features = signatures_list[1:4],
   name = c("MESlike", "AClike", "OPClike", "NPClike"),
   nbin = 30,
   ctrl = 100,
@@ -494,7 +265,7 @@ write.csv(as.data.frame(percondition_perpatient), file = paste0(resultsdirectory
 ####We now Calculate MESlike1,2 and NPClike1,2 scores for each sample #####
 Bardy_10x <- AddModuleScore(
   object = Bardy_10x,
-  features = c(MESlike1_features, MESlike2_features, NPClike1_features, NPClike2_features),
+  features = signatures_list[5:8],
   name = c("MESlike1", "MESlike2", "NPClike1", "NPClike2"),
   nbin = 30,
   ctrl = 100,
@@ -1495,7 +1266,7 @@ pie
 ggsave(pie, filename = paste(resultsdirectory, "/plots/Pie charts/GBM_700cells__Cellstate_proportions_per_Condition_PatientID_NoLegend.pdf", sep = "/"), height = 6, width = 20, dpi = 300, useDingbats = FALSE)
 ```
 
-i. ***We will now visualise analysed data. i. FIGURE 3 and SUPP FIGURE 3.***
+i. ***We will now visualise analysed data. i. FIGURE 3 and SUPP FIGURE 4.***
 ```{RNA seq Plots for Figure 3 and Supp Figure 3}
 ## FIGURE 3D AND E: Proliferation scatter plots with ggplot2. ####
 ## geom_pointdenisty from the ggpointdensity package (recently developed by Lukas Kremer and Simon Anders (2019)) allows you visualize density and individual data points at the same time
@@ -1529,7 +1300,7 @@ RP <- RidgePlot(Bardy_10x, group.by = "Proliferation.Score", log = FALSE)  + ##y
 RP
 ggsave(RP, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_RP_ProliferationScore_NoLegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 
-###SUPP FIGURE 3A: UMAP plot to visualise Cyclcing and NonCycling Cells ####
+###SUPP FIGURE 4A: UMAP plot to visualise Cyclcing and NonCycling Cells ####
 umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, repel = FALSE, group.by = "CellCycle", split.by = "Condition", cols = c("blue","red"))  + ##you can replace the group.by variable to any column on the metadata
   theme(legend.position = "bottom", legend.text = element_text(size = 22), legend.justification = "center", 
         axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
@@ -1539,7 +1310,7 @@ umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, rep
 umap
 ggsave(umap, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_Proliferation_splitbyCondition_Legend.pdf", sep = "/"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
 
-##SUPP FIGURE 3B: Feature Plot by to visualise  expression of MKI67
+##SUPP FIGURE 4B: Feature Plot by to visualise  expression of MKI67
 FP <- FeaturePlot(Bardy_10x, features = "MKI67", pt.size = 0.2, label = FALSE, repel = FALSE, split.by = "Condition", cols = c("lightgrey","red"), order = TRUE, keep.scale = "all") & ##you can replace the group.by variable to any column on the metadata
   theme(legend.position = "bottom", legend.text = element_text(size = 22), legend.justification = "center", 
         axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
@@ -1550,9 +1321,56 @@ FP
 ggsave(FP, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_MKI67_Condition_Legend.pdf", sep = "/"), height = 6, width = 14, dpi = 300, useDingbats = FALSE)
 ```
 
-ii. ***FIGURE 4 and SUPP FIGURE 4.***
+ii.  ***SUPP FIGURE 5.***
+```{Create UMAP plots - Supplementary Figure 5}
+##Use this line to change the order of the factor levels
+##Bardy_10x$Condition <- factor(Bardy_10x$Condition, levels = c("TME", "CSF"))
 
-```{RNA seq Plots for Figure 4 and Supp Figure 4}
+####SUPP FIGURE 5H:UMAP plot by PatientID####
+umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, repel = FALSE, group.by = "PatientID", split.by = "Condition")  + ##you can replace the group.by variable to any column on the metadata
+  theme(legend.position = "bottom", legend.text = element_text(size = 22), legend.justification = "center", 
+        axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
+        axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22),
+        panel.border = element_rect(fill=NA, colour = "black", size=1.5))  + 
+  coord_cartesian(xlim = c(-15,15), ylim = c(-15, 15)) 
+umap
+ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_PatientID_splitbyCondition_NoLegend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
+
+
+####SUPP FIGURE 5I:UMAP Plot by Quadrant####
+umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, repel = FALSE, split.by = "Condition", group.by = "Quadrant", cols = c("goldenrod1","red","saddlebrown","royalblue1"))  + ##you can replace the group.by variable to any column on the metadata
+  theme(legend.position = "bottom", legend.text = element_text(size = 22), legend.justification = "center", 
+        axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
+        axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22),
+        panel.border = element_rect(fill=NA, colour = "black", size=1.5))  + 
+  coord_cartesian(xlim = c(-15,15), ylim = c(-15, 15)) 
+umap
+ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_Quadrant_splitbyCondition_Legend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
+
+#######OPTIONAL: UMAP Plot by Condition####
+umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, repel = FALSE, group.by = "Condition", cols = c("black","red"), split.by = "Condition")  + ##you can replace the group.by variable to any column on the metadata
+  theme(legend.position = "none", legend.text = element_text(size = 22), legend.justification = "center", 
+        axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
+        axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22),
+        panel.border = element_rect(fill=NA, colour = "black", size=1.5))  + 
+  coord_cartesian(xlim = c(-15,15), ylim = c(-15, 15)) 
+umap
+##ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_Condition_splitbyCondition_NoLegend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
+
+##OPTIONAL: Visualise MESlike1 and MESlike 2. ####
+umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, repel = FALSE, group.by = "MESlike", split.by = "Condition", cols = c("lightsalmon","red","grey79"))  + ##you can replace the group.by variable to any column on the metadata
+  theme(legend.position = "none", legend.text = element_text(size = 22), legend.justification = "center", 
+        axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
+        axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22),
+        panel.border = element_rect(fill=NA, colour = "black", size=1.5))  + 
+  coord_cartesian(xlim = c(-15,15), ylim = c(-15, 15)) 
+umap
+ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_MESlike_splitbyCondition_NoLegend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
+```
+
+iii. ***FIGURE 4 and SUPP FIGURE 6.***
+
+```{RNA seq Plots for Figure 4 and Supp Figure 6}
 ## FIGURE 4A-C: Recreate Neftel meta-module plots with ggplot2. ####
 library(ggplot2)
 library(ggpointdensity)
@@ -1659,7 +1477,7 @@ corplot
 ##ggsave(corplot, filename = paste0(resultsdirectory,"/plots/Heatmap/GBM_CorrelationPlot_All.pdf", sep = "/"), height = 8, width = 8, dpi = 300, useDingbats = FALSE)
 ggsave(corplot, filename = paste0(resultsdirectory,"/plots/Heatmap/GBM_CorrelationPlot_NeftelTCGAStemCell.pdf", sep = "/"), height = 8, width = 8, dpi = 300, useDingbats = FALSE)
 
-## SUPP FIGURE 4E and F: Stem cell gene expression ####
+## SUPP FIGURE 6E and F: Stem cell gene expression ####
 ##We load csv containing stem cell signature and extract the Lathia Stem Cell Genes. 
 stem_cell <- read.csv(file = paste(datadirectory,"/reference_sheets/Stemcell.Markers.csv"), header = TRUE)
 Lathia_GSC <- as.character(stem_cell[c(1:7,9:21),1]) ##SSEA1 is not found in the dataset so we exclude it.
@@ -1707,9 +1525,9 @@ write.csv(as.data.frame(Proportion_GSC), file = paste0(workingdirectory, "Propor
 write.csv(as.data.frame(Number_GSC), file = paste0(workingdirectory, "Number_Lathia_GSC.csv"), quote = FALSE)
 ```
 
-iii. ***FIGURE 5 and SUPP FIGURE 5.***
+iv. ***FIGURE 5 and SUPP FIGURE 7.***
 
-```{RNA seq Plots for Figure 5 and Supp Figure 5}
+```{RNA seq Plots for Figure 5 and Supp Figure 7}
 ### FIGURE 5A: Volcano Plot for all cell lines ####
 ##CSF_Markers <- read.csv(file = paste0(resultsdirectory,"/Differential Expression/All_CSF_Markers_700cells_percondition_downsample-minpct0.1.csv"))
 CSF_Markers$p_val_new <- CSF_Markers$p_val_adj
@@ -1822,7 +1640,7 @@ h <- Heatmap(Single_heatmap[1:40,],
 h
 dev.off()
 
-### SUPP FIGURE 5A: Volcano Plot for individual cell lines ####
+### SUPP FIGURE 7A: Volcano Plot for individual cell lines ####
 CSF_Markers_111$p_val_new <- CSF_Markers_111$p_val_adj
 CSF_Markers_111$p_val_new[which(CSF_Markers_111$p_val_adj == 0)] <- 1e-304
 CSF_Markers_111$log10p_adj <- -log10(CSF_Markers_111$p_val_new)
@@ -1855,9 +1673,8 @@ VP
 ggsave(VP, filename = paste(resultsdirectory, "/plots/Differential expression/VP_top_genes_111_downsampledcells.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 ```
 
-iv. ***FIGURE 6 and SUPP FIGURE 6.***
-
-```{RNA seq Plots for Figure 6 and Supp Figure 6}
+v. ***FIGURE 6 and SUPP FIGURE AND 10.***
+```{RNA seq Plots for Figure 6 and Supp Figure 9 and 10}
 ## FIGURE 6A: Feature Plot showing expression of NUPR1. ####
 FP <- FeaturePlot(Bardy_10x, features = "NUPR1", pt.size = 0.2, label = FALSE, repel = FALSE, split.by = "Condition", cols = c("lightgrey","red"), order = TRUE, keep.scale = "all") & ##you can replace the group.by variable to any column on the metadata
   theme(legend.position = "bottom", legend.text = element_text(size = 22), legend.justification = "center", 
@@ -1868,7 +1685,7 @@ FP <- FeaturePlot(Bardy_10x, features = "NUPR1", pt.size = 0.2, label = FALSE, r
 FP 
 ggsave(FP, filename = paste(resultsdirectory, "/plots/UMAP/NUPR1_splitbyCondition_NoLegend.pdf", sep = "/"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
 
-## SUPP FIGURE 6A: Violin Plot showing expression of NUPR1 across quadrants. ####
+## SUPP FIGURE 9A: Violin Plot showing expression of NUPR1 across quadrants. ####
 GBM_700cells$Condition <- factor(GBM_700cells$Condition, levels = c("CSF","TME"))
 VP <- VlnPlot(GBM_700cells, group.by = c("Quadrant"), features = "NUPR1", cols = c("red","black"),split.plot = TRUE, split.by = "Condition", pt.size = 0)  + ##you can replace the group.by variable to any column on the metadata
   theme(legend.position = "bottom", legend.text = element_text(size = 22), legend.justification = "center", 
@@ -1878,17 +1695,15 @@ VP <- VlnPlot(GBM_700cells, group.by = c("Quadrant"), features = "NUPR1", cols =
 VP
 ggsave(VP, filename = paste(resultsdirectory, "/plots/Differential expression/GBM_VP_NUPR1_Legend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 
-RP <- RidgePlot(GBM_700cells, features = "NUPR1", group.by = "Condition", sort = "PatientID", log = F)  + ##you can replace the group.by variable to any column on the metadata. Change to "Quiescent.Score" for Figure 3I. 
+RP <- RidgePlot(GBM_700cells, features = "SLC22A17", group.by = "Condition", sort = "PatientID", log = F)  + ##you can replace the group.by variable to any column on the metadata. Change to "Quiescent.Score" for Figure 3I. 
   theme(legend.position = "none", legend.text = element_text(size = 16), legend.justification = "center")
 RP
 ggsave(RP, filename = paste0(resultsdirectory,"/plots/Scatterplots/GBM_RP_ProliferationScore_NoLegend.pdf", sep = "/"), height = 6, width = 6, dpi = 300, useDingbats = FALSE)
 
-## SUPP FIGURE 6E: Hierarchical clustering and heatmap of treatment response in GM and CSF. ####
+## SUPP FIGURE 10E: Hierarchical clustering and heatmap of treatment response in GM and CSF. ####
 ##First we perform a hierarchical clustering to cluster cell lines together. 
 
 ##Load data - average viability of cells with treatment. 
-##CSF_Treatment <- read.csv(file = paste("~/Google Drive/PhD/Bardy_lab_users/Inushi/CSF_Treatment.csv"))
-##TME_Treatment <- read.csv(file = paste("~/Google Drive/PhD/Bardy_lab_users/Inushi/TME_Treatment.csv"))
 All_Treatment <- read.csv(file = paste0(datadirectory, "/reference_sheets/TME_CSF_Treatment.csv"))
 All_Treatment <- read.csv(file = paste0(datadirectory, "/reference_sheets/TME_CSF_ki67_Treatment.csv"))
 
@@ -1949,50 +1764,16 @@ h
 dev.off()
 ```
 
-v.  ***SUPP FIGURE 10.***
-```{Create UMAP and Feature plots - Supplementary Figures 3a-b and 10h-i}
-##Use this line to change the order of the factor levels
-##Bardy_10x$Condition <- factor(Bardy_10x$Condition, levels = c("TME", "CSF"))
+vi. ***SUPP FIGURE 15 - SANTB000134 NME expression***
+```{We will now look at Average NUPR1 expression in SANTB00134 NM, TME and CSF}
+## To see how the seurat object was created please see Rmarkdown file "SANTB00134_GM_NM_CSF"
 
-####SUPP FIGURE 10H:UMAP plot by PatientID####
-umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, repel = FALSE, group.by = "PatientID", split.by = "Condition")  + ##you can replace the group.by variable to any column on the metadata
-  theme(legend.position = "bottom", legend.text = element_text(size = 22), legend.justification = "center", 
-        axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
-        axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22),
-        panel.border = element_rect(fill=NA, colour = "black", size=1.5))  + 
-  coord_cartesian(xlim = c(-15,15), ylim = c(-15, 15)) 
-umap
-ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_PatientID_splitbyCondition_NoLegend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
+##Calculate average expression of genes and extract RNA counts from list
+matrix <- AverageExpression(SANTB00134_NME_Downsample, assays = "RNA")
+matrix <- matrix$RNA
+## Subset list for NUPR1
+matrix <- matrix[rownames(matrix) %in% "NUPR1",]
 
-
-####SUPP FIGURE 10I:UMAP Plot by Quadrant####
-umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, repel = FALSE, split.by = "Condition", group.by = "Quadrant", cols = c("goldenrod1","red","saddlebrown","royalblue1"))  + ##you can replace the group.by variable to any column on the metadata
-  theme(legend.position = "bottom", legend.text = element_text(size = 22), legend.justification = "center", 
-        axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
-        axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22),
-        panel.border = element_rect(fill=NA, colour = "black", size=1.5))  + 
-  coord_cartesian(xlim = c(-15,15), ylim = c(-15, 15)) 
-umap
-ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_Quadrant_splitbyCondition_Legend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
-
-#######OPTIONAL: UMAP Plot by Condition####
-umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, repel = FALSE, group.by = "Condition", cols = c("black","red"), split.by = "Condition")  + ##you can replace the group.by variable to any column on the metadata
-  theme(legend.position = "none", legend.text = element_text(size = 22), legend.justification = "center", 
-        axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
-        axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22),
-        panel.border = element_rect(fill=NA, colour = "black", size=1.5))  + 
-  coord_cartesian(xlim = c(-15,15), ylim = c(-15, 15)) 
-umap
-##ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_Condition_splitbyCondition_NoLegend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
-
-##OPTIONAL: Visualise MESlike1 and MESlike 2. ####
-umap <- DimPlot(Bardy_10x, reduction = "umap", pt.size = 0.2, label = FALSE, repel = FALSE, group.by = "MESlike", split.by = "Condition", cols = c("lightsalmon","red","grey79"))  + ##you can replace the group.by variable to any column on the metadata
-  theme(legend.position = "none", legend.text = element_text(size = 22), legend.justification = "center", 
-        axis.text.x = element_text(size = 22), axis.text.y = element_text(size = 22), 
-        axis.title.x = element_text(size = 22), axis.title.y = element_text(size = 22),
-        panel.border = element_rect(fill=NA, colour = "black", size=1.5))  + 
-  coord_cartesian(xlim = c(-15,15), ylim = c(-15, 15)) 
-umap
-ggsave(umap, filename = paste0(resultsdirectory, "/plots/UMAP/GBM_MESlike_splitbyCondition_NoLegend.pdf"), height = 6, width = 12, dpi = 300, useDingbats = FALSE)
+## save expression matrix to be visualised on Prism
+write.csv(matrix, file = paste0(datadirectory, "/RData/Individual Cell Line RData/Prefilter_and_combined_RData/SANTB00134_NME_QC_Downsampled_LathiaStemCellGenes_AvExpression.csv"))
 ```
-
