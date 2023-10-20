@@ -41,7 +41,7 @@ This folder contains all the R scripts used to process transcriptomic data for t
 
   ***Other files:*** 
 
-   *TME_CSF_Treatment.csv:* Average cell viability data of twenty five cell lines following treatment (temzolomide (TMZ), irradiation (Irr) and trifluoperazine (TFP).  
+   *TME_CSF_Treatment.csv:* Average cell viability data of 25 patient-derived cell lines following treatment (temzolomide (TMZ), irradiation (Irr) and trifluoperazine (TFP)).  
 
 ### Code and Software
 
