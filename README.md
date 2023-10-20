@@ -28,18 +28,18 @@ This folder contains all the R scripts used to process transcriptomic data for t
 - Metadata: contains CSV files of transcriptomic data before and after pre-processing.
 - Reference sheets: contains files used to generate figures.
 
-  Gene marker files:
-    *housekeepers.txt:* Housekeeping gene lists used for quality control.
+  ***Gene marker files:***
+   - *housekeepers.txt:* Housekeeping gene lists used for quality control.
+   
+   -  *cellcycle_tirosh.tsv:* Cell cycle genes used to calculate proliferation scores.
+   
+   -    *top50quiescent_atkins.txt:* Quiescent gene lists used to calculate quiescence scores.
+   
+   -  *IDHwt.GBM.MetaModules.tsv:* MES, AC, NPC and OPC marker lists from Neftel et al, 2019.
+   
+   -  *Stemcell.Markers.csv:* Stem cell marker lists for Supplementary Figure 6e. Only Lathia gene lists were used for this figure. 
 
-    *cellcycle_tirosh.tsv:* Cell cycle genes used to calculate proliferation scores. 
-  
-    *top50quiescent_atkins.txt:* Quiescent gene lists used to calculate quiescence scores. 
-  
-    *IDHwt.GBM.MetaModules.tsv:* MES, AC, NPC and OPC marker lists from Neftel et al, 2019.
-  
-    *Stemcell.Markers.csv:* Stem cell marker lists for Supplementary Figure 6e. Only Lathia gene lists were used for this figure. 
-
-  Other files: 
+  ***Other files:*** 
 
    *TME_CSF_Treatment.csv:*: Average cell viability data of twenty five cell lines following treatment (temzolomide (TMZ), irradiation (Irr) and trifluoperazine (TFP).  
 
@@ -53,6 +53,7 @@ Requirements for downstream data analysis:
 - R
 - RStudio
 - Seurat
+
 *All other required R packages are listed within Rscripts.* 
 
 ***NOTE: 'TME' is synonymous with 'GM' mentioned in this paper'.*** 
