@@ -25,8 +25,8 @@ This folder contains all the R scripts used to process transcriptomic data for t
 4. ****SANTB00134_GM_NM_CSF:**** Comparisons between GM, NM and CSF for patient SANTB00134 (for Supplementary figure 15m). This script also contains quality control parameters for SANTB00134. 
 
 ### **Data:** 
-- Metadata: contains CSV files of transcriptomic data before and after pre-processing.
-- Reference sheets: contains files used to generate figures.
+1. Metadata: contains CSV files of transcriptomic data before and after pre-processing.
+2. Reference sheets: contains files used to generate figures.
 
   ***Gene marker files:***
    - *housekeepers.txt:* Housekeeping gene lists used for quality control.
@@ -41,7 +41,7 @@ This folder contains all the R scripts used to process transcriptomic data for t
 
   ***Other files:*** 
 
-   *TME_CSF_Treatment.csv:*: Average cell viability data of twenty five cell lines following treatment (temzolomide (TMZ), irradiation (Irr) and trifluoperazine (TFP).  
+   *TME_CSF_Treatment.csv:* Average cell viability data of twenty five cell lines following treatment (temzolomide (TMZ), irradiation (Irr) and trifluoperazine (TFP).  
 
 ### Code and Software
 
