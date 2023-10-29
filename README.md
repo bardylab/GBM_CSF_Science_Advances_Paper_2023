@@ -34,6 +34,8 @@ This dataset contains 10 patient cell lines (111, 134, 159, 448, 468, 469, 497, 
       - IDHwt.GBM.MetaModules.tsv
       - Stemcell.Markers.csv
       - TCGA.Verhaak.GBM.txt
+      - TME_CSF_Treatment.csv
+      - TFP_targets.csv
 
 ### Data Description ###
 ### **Rscripts:**
@@ -167,6 +169,8 @@ This folder contains all the R scripts used to process transcriptomic data for t
 
 2. reference sheets: contains files used to generate figures.
 
+***NOTE: 'NA' values within each of the files in the reference sheets folders indicate empty cells***
+
   ***Gene marker files:***
    - *housekeepers.txt:* Housekeeping genes used for quality control.
       - Reference study: Tirsoh et al, 2016 (https://www.science.org/doi/abs/10.1126/science.aad0501)
@@ -225,11 +229,15 @@ This folder contains all the R scripts used to process transcriptomic data for t
         - Mesenchymal: Genes defining the MES subtype
         - Classical: Genes defining the CL subtype
       - Linked RScript: GBM_CSF_Paper_Analysis.Rmd
+    
+     - *TFP_targets.csv:* List of compiled target genes of trifluoperazine
+     - Variables: 1
+     - Number of cases/rows: 88
         
   ***other files:*** 
 
    *TME_CSF_Treatment.csv:* Average cell viability data of 25 patient-derived cell lines following treatment.  
-   - Variables: 4
+   - Variables: 8
    - Number of cases/rows: 25
    - Variable list:
        -  TME TMZ: Average cell survival of cells cultured in TME (GM) for three days before treatment with 100 µM temozolomide (TMZ) for 7 days (percent). 
@@ -241,6 +249,7 @@ This folder contains all the R scripts used to process transcriptomic data for t
        -  CSF TFP	TME TMZ + Irr: Average cell survival of cells cultured in CSF for three days before treatment with 10 µM TFP for 24 hours (percent). 
        -  CSF TMZ + Irr +TFP: Average cell survival of cells cultured in CSF for three days before combined treatment with 100 µM temozolomide (TMZ) for 7 days, 5 fractions of 2 Gy irradiation (Irr) for 5 days and 10 µM TFP for 24 hours (percent). 
    - Linked RScript: GBM_CSF_Paper_Analysis.Rmd
+
 
 ### Code and Software
 
