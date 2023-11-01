@@ -1,5 +1,9 @@
 # Human Cerebrospinal fluid affects chemoradiotherapy sensitivities in tumour cells from glioblastoma patients.
 
+https://www.science.org/doi/10.1126/sciadv.adf1332
+
+DOI: 10.1126/sciadv.adf1332
+
 ### Data Access and Information
 
 The unprocessed (fastq) and processed (counts, features, barcodes) transcriptomic data of this paper can be found at GSE243501 on GEO: https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE243501.
